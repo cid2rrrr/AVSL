@@ -1,3 +1,3 @@
-Input: Video(mp4), Audio(wave)
+Input: Video(mp4) -> frame -> learned object query, Audio(wave) -> spectrogram
 
 
