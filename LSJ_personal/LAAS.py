@@ -98,7 +98,7 @@ def act(x, activation):
 
 
 class ConvBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, size, activation, momentum, classes_num = 527):
+    def __init__(self, in_channels, out_channels, size, activation, momentum, classes_num = 128):
         super(ConvBlock, self).__init__()
 
         self.activation = activation
@@ -118,14 +118,14 @@ class ConvBlock(nn.Module):
 
         self.bn2 = nn.BatchNorm2d(out_channels, momentum=momentum)
         # change autotagging size
-        ######
-        # self.emb1 = nn.Linear(classes_num, out_channels, bias=True)
-        # self.emb2 = nn.Linear(classes_num, out_channels, bias=True)
+        self.emb1 = nn.Linear(classes_num, out_channels, bias=True)
+        self.emb2 = nn.Linear(classes_num, out_channels, bias=True)
         #####
-        self.emb1 = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=size,
-                              stride=1, dilation=1, padding=pad, bias=False)
-        self.emb2 = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=size,
-                              stride=1, dilation=1, padding=pad, bias=False)
+        # self.emb_conv1 = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=size,
+        #                       stride=1, dilation=1, padding=pad, bias=False)
+        # self.emb_conv2 = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=size,
+        #                       stride=1, dilation=1, padding=pad, bias=False)
+        #####
         self.init_weights()
         
     def init_weights(self):
@@ -138,10 +138,19 @@ class ConvBlock(nn.Module):
 
     # latent query embedded 
     def forward(self, x, condition):
-        c1 = self.emb1(condition)
-        c2 = self.emb2(condition)
-        x = act(self.bn1(self.conv1(x)), self.activation) + c1[:, :, None, None]
-        x = act(self.bn2(self.conv2(x)), self.activation) + c2[:, :, None, None]
+        # c1 = self.emb1(condition)
+        # c2 = self.emb2(condition)
+        # x = act(self.bn1(self.conv1(x)), self.activation) + c1[:, :, None, None]
+        # x = act(self.bn2(self.conv2(x)), self.activation) + c2[:, :, None, None]
+        #####
+        c1_ = self.emb_conv1(condition)
+        c1 = self.emb1(c1_)
+        c2_ = self.emb_conv2(condition)
+        c2 = self.emb2(c2_)
+        x = act(self.bn1(self.conv1(x)), self.activation) + c1[:, :, None]
+        x = act(self.bn2(self.conv2(x)), self.activation) + c2[:, :, None]
+        #####
+        
         return x
 
 
@@ -241,37 +250,37 @@ class ZeroShotASP(pl.LightningModule):
 
         self.bn0 = nn.BatchNorm2d(window_size // 2 + 1, momentum=momentum)
 
-        self.encoder_block1 = EncoderBlock(in_channels=channels, out_channels=32*channels, 
+        self.encoder_block1 = EncoderBlock(in_channels=channels, out_channels=32, 
             downsample=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        self.encoder_block2 = EncoderBlock(in_channels=32*channels, out_channels=64*channels, 
+        self.encoder_block2 = EncoderBlock(in_channels=32, out_channels=64, 
             downsample=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        self.encoder_block3 = EncoderBlock(in_channels=64*channels, out_channels=128*channels, 
+        self.encoder_block3 = EncoderBlock(in_channels=64, out_channels=128, 
             downsample=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        self.encoder_block4 = EncoderBlock(in_channels=128*channels, out_channels=256*channels, 
+        self.encoder_block4 = EncoderBlock(in_channels=128, out_channels=256, 
             downsample=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        self.encoder_block5 = EncoderBlock(in_channels=256*channels, out_channels=512*channels, 
+        self.encoder_block5 = EncoderBlock(in_channels=256, out_channels=512, 
             downsample=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        self.encoder_block6 = EncoderBlock(in_channels=512*channels, out_channels=1024*channels, 
+        self.encoder_block6 = EncoderBlock(in_channels=512, out_channels=1024, 
             downsample=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        self.conv_block7 = ConvBlock(in_channels=1024*channels, out_channels=2048*channels, 
+        self.conv_block7 = ConvBlock(in_channels=1024, out_channels=2048, 
             size=3, activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        self.decoder_block1 = DecoderBlock(in_channels=2048*channels, out_channels=1024*channels, 
+        self.decoder_block1 = DecoderBlock(in_channels=2048, out_channels=1024, 
             stride=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        self.decoder_block2 = DecoderBlock(in_channels=1024*channels, out_channels=512*channels, 
+        self.decoder_block2 = DecoderBlock(in_channels=1024, out_channels=512, 
             stride=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        self.decoder_block3 = DecoderBlock(in_channels=512*channels, out_channels=256*channels, 
+        self.decoder_block3 = DecoderBlock(in_channels=512, out_channels=256, 
             stride=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        self.decoder_block4 = DecoderBlock(in_channels=256*channels, out_channels=128*channels, 
+        self.decoder_block4 = DecoderBlock(in_channels=256, out_channels=128, 
             stride=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        self.decoder_block5 = DecoderBlock(in_channels=128*channels, out_channels=64*channels, 
+        self.decoder_block5 = DecoderBlock(in_channels=128, out_channels=64, 
             stride=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        self.decoder_block6 = DecoderBlock(in_channels=64*channels, out_channels=32*channels, 
+        self.decoder_block6 = DecoderBlock(in_channels=64, out_channels=32, 
             stride=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
 
-        self.after_conv_block1 = ConvBlock(in_channels=32*channels, out_channels=32*channels, 
+        self.after_conv_block1 = ConvBlock(in_channels=32, out_channels=32, 
             size=3, activation=activation, momentum=momentum, classes_num = config.latent_dim)
 
-        self.after_conv2 = nn.Conv2d(in_channels=32*channels, out_channels=channels, 
+        self.after_conv2 = nn.Conv2d(in_channels=32, out_channels=channels, 
             kernel_size=(1, 1), stride=(1, 1), padding=(0, 0), bias=True)
 
         self.init_weights()
