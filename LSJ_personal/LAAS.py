@@ -122,10 +122,10 @@ class ConvBlock(nn.Module):
         # self.emb1 = nn.Linear(classes_num, out_channels, bias=True)
         # self.emb2 = nn.Linear(classes_num, out_channels, bias=True)
         #####
-        self.emb1 = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=(size, size),
-                              stride=(1, 1), dilation=(1 ,1), padding=(pad, pad), bias=False)
-        self.emb2 = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=(size, size),
-                              stride=(1, 1), dilation=(1 ,1), padding=(pad, pad), bias=False)
+        self.emb1 = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=size,
+                              stride=1, dilation=1, padding=pad, bias=False)
+        self.emb2 = nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=size,
+                              stride=1, dilation=1, padding=pad, bias=False)
         self.init_weights()
         
     def init_weights(self):
