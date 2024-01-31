@@ -29,6 +29,11 @@ from torchlibrosa.stft import STFT, ISTFT, magphase
 import pytorch_lightning as pl
 
 
+#####
+import torchvggish.vggish as vggish
+
+
+
 
 def init_layer(layer):
     """Initialize a Linear or Convolutional layer. """
@@ -598,11 +603,32 @@ class ZeroShotASP(pl.LightningModule):
 
 class LAAS(pl.LightningModule):
     def __init__(self):
+        self.urls = {
+            'vggish': './torchvggish/cp/vggish-10086976.pth',
+            'pca': './torchvggish/cp/vggish_pca_params-970ea276.pth'
+            }
         self.ASP = ZeroShotASP()
-        self.VGGish = None
+        self.VGGish = vggish.VGGish(self.urls)
+
+        for param in self.VGGish.parameters():
+            param.requires_grad = False
 
     def init_weights(self):
         pass
 
     def forward(self, input):
-        pass
+        # do something
+        quries = None
+        conditions = quries
+        
+        # x = separated audios
+        x = self.ASP(input.audio, conditions)
+        
+        # 버리는 audio
+        x = x[:-1]
+
+        x = self.VGGish(x)
+
+        # do other things
+
+        

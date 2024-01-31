@@ -144,8 +144,8 @@ class VGGish(VGG):
     def __init__(self, urls, device=None, pretrained=True, preprocess=True, postprocess=True, progress=True):
         super().__init__(make_layers())
         if pretrained:
-            state_dict = hub.load_state_dict_from_url(urls['vggish'], progress=progress)
-            # super().load_state_dict(torch.load(urls))
+            # state_dict = hub.load_state_dict_from_url(urls['vggish'], progress=progress)
+            super().load_state_dict(torch.load(urls['vggish']))
 
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -155,8 +155,8 @@ class VGGish(VGG):
         if self.postprocess:
             self.pproc = Postprocessor()
             if pretrained:
-                state_dict = hub.load_state_dict_from_url(urls['pca'], progress=progress)
-                # state_dict = torch.load(urls)
+                # state_dict = hub.load_state_dict_from_url(urls['pca'], progress=progress)
+                state_dict = torch.load(urls['pca'])
                 # TODO: Convert the state_dict to torch
                 state_dict[vggish_params.PCA_EIGEN_VECTORS_NAME] = torch.as_tensor(
                     state_dict[vggish_params.PCA_EIGEN_VECTORS_NAME], dtype=torch.float
