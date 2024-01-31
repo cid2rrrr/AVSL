@@ -250,7 +250,7 @@ class ZeroShotASP(pl.LightningModule):
 
         self.bn0 = nn.BatchNorm2d(window_size // 2 + 1, momentum=momentum)
 
-        self.encoder_block1 = EncoderBlock(in_channels=channels, out_channels=32, 
+        self.encoder_block1 = EncoderBlock(in_channels=channels, out_channels=32*channels, 
             downsample=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
         self.encoder_block2 = EncoderBlock(in_channels=32, out_channels=64, 
             downsample=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
@@ -594,3 +594,15 @@ class ZeroShotASP(pl.LightningModule):
         )
 
         return [optimizer], [scheduler]
+
+
+class LAAS(pl.LightningModule):
+    def __init__(self):
+        self.ASP = ZeroShotASP()
+        self.VGGish = None
+
+    def init_weights(self):
+        pass
+
+    def forward(self, input):
+        pass
