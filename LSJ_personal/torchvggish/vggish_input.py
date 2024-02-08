@@ -96,3 +96,24 @@ def wavfile_to_examples(wav_file, return_tensor=True):
     assert wav_data.dtype == np.int16, 'Bad sample type: %r' % wav_data.dtype
     samples = wav_data / 32768.0  # Convert to [-1.0, +1.0]
     return waveform_to_examples(samples, sr, return_tensor)
+
+
+def fft_to_examples(fft, return_tensor=True, log_offset=0):
+    log_spec = np.dot(fft, mel_features.spectrogram_to_mel_matrix(
+        num_spectrogram_bins=fft.shape[1],
+        audio_sample_rate=vggish_params.SAMPLE_RATE,
+        log_offset=vggish_params.LOG_OFFSET,
+        window_length_secs=vggish_params.STFT_WINDOW_LENGTH_SECONDS,
+        hop_length_secs=vggish_params.STFT_HOP_LENGTH_SECONDS,
+        num_mel_bins=vggish_params.NUM_MEL_BINS,
+        lower_edge_hertz=vggish_params.MEL_MIN_HZ,
+        upper_edge_hertz=vggish_params.MEL_MAX_HZ))
+    
+    log_mel_examples =  np.log(log_spec + log_offset)
+
+    if return_tensor:
+        log_mel_examples = torch.tensor(
+            log_mel_examples, requires_grad=True)[:,None,:,:].float()
+    
+    return log_mel_examples
+
