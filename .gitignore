@@ -1,1 +1,10 @@
 *.pth
+*.mp4
+*.wav
+/workspace/GitHub/AVSL/DATA/
+/workspace/GitHub/AVSL/models/Dataset/
+ckpt/
+*.yaml
+models/Mask2former/
+/workspace/GitHub/AVSL/models/Mask2former/
+*.imsi

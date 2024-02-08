@@ -210,6 +210,7 @@ class DecoderBlock(nn.Module):
 
 
 class ZeroShotASP(pl.LightningModule):
+# class ZeroShotASP():
     '''
     Args:
     channels (int): the audio channel, default:1 (mono)
@@ -217,7 +218,8 @@ class ZeroShotASP(pl.LightningModule):
     at_model (module): the sound event detection system
     dataset (module): the dataset variable to control the randomness in each epoch (not affect in evaluation mode) 
     '''
-    def __init__(self, config, at_model, dataset, channels=100):
+    # def __init__(self, config, at_model, dataset, channels=100):
+    def __init__(self, config, channels=99):
         super().__init__()
 
         # hyper parameters
@@ -233,10 +235,10 @@ class ZeroShotASP(pl.LightningModule):
         self.channels=channels
         #####
         self.config = config
-        self.at_model = at_model
-        self.opt_thres = pickle.load(open('opt_thres.pkl', 'rb'))
-        self.loss_func = get_loss_func(self.config.loss_type)
-        self.dataset = dataset
+        # self.at_model = at_model
+        # self.opt_thres = pickle.load(open('opt_thres.pkl', 'rb'))
+        # self.loss_func = get_loss_func(self.config.loss_type)
+        # self.dataset = dataset
         if self.config.using_whiting:
             temp = np.load("whiting_weight.npy", allow_pickle=True)
             temp = temp.item()
@@ -255,7 +257,7 @@ class ZeroShotASP(pl.LightningModule):
 
         self.bn0 = nn.BatchNorm2d(window_size // 2 + 1, momentum=momentum)
 
-        self.encoder_block1 = EncoderBlock(in_channels=channels, out_channels=32*channels, 
+        self.encoder_block1 = EncoderBlock(in_channels=channels, out_channels=32, 
             downsample=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
         self.encoder_block2 = EncoderBlock(in_channels=32, out_channels=64, 
             downsample=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
@@ -601,6 +603,9 @@ class ZeroShotASP(pl.LightningModule):
         return [optimizer], [scheduler]
 
 
+
+
+
 class LAAS(pl.LightningModule):
     def __init__(self):
         self.urls = {
@@ -622,12 +627,12 @@ class LAAS(pl.LightningModule):
         conditions = quries
         
         # x = separated audios
-        x = self.ASP(input.audio, conditions)
+        x = self.ASP(input.audio, conditions)['wav'].detach().numpy()#.reshape(channels, length)
         
         # 버리는 audio
         x = x[:-1]
 
-        x = self.VGGish(x)
+        x = self.VGGish(x, fs=16000)
 
         # do other things
 
