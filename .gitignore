@@ -9,3 +9,4 @@ models/Mask2former/
 /workspace/GitHub/AVSL/models/Mask2former/
 *.imsi
 *.log
+*.pyc

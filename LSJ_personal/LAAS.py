@@ -317,8 +317,10 @@ class ZeroShotASP(pl.LightningModule):
         #####
         for _ in range(self.channels):
             sp_list.append(self.spectrogram(input[:,:,0]))
-
-        output = torch.cat(sp_list, dim=1)
+        #####
+        # output = torch.cat(sp_list, dim=1)
+        #####
+        output = torch.stack(sp_list, dim=1)
         return output
 
 
@@ -627,12 +629,15 @@ class LAAS(pl.LightningModule):
         conditions = quries
         
         # x = separated audios
-        x = self.ASP(input.audio, conditions)['wav'].detach().numpy()#.reshape(channels, length)
+        x = self.ASP(input.audio, conditions)['sp'].detach().numpy()#.reshape(channels, length)
         
         # 버리는 audio
         x = x[:-1]
-
-        x = self.VGGish(x, fs=16000)
+        
+        audio_features = []
+        for i in range(x.shape[0]):
+            audio_features.append(self.VGGish(x[i], fs=16000))
+        # x = self.VGGish(x, fs=16000)
 
         # do other things
 
