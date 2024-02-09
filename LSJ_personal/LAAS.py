@@ -629,7 +629,7 @@ class LAAS(pl.LightningModule):
         conditions = quries
         
         # x = separated audios
-        x = self.ASP(input.audio, conditions)['sp'].detach().numpy()#.reshape(channels, length)
+        x = self.ASP(input["audio"], conditions)['sp'].detach().numpy()#.reshape(channels, length)
         
         # 버리는 audio
         x = x[:-1]
