@@ -143,17 +143,32 @@ class ConvBlock(nn.Module):
 
     # latent query embedded 
     def forward(self, x, condition):
-        # c1 = self.emb1(condition)
-        # c2 = self.emb2(condition)
-        # x = act(self.bn1(self.conv1(x)), self.activation) + c1[:, :, None, None]
-        # x = act(self.bn2(self.conv2(x)), self.activation) + c2[:, :, None, None]
+        new_shape = [x.shape[0] * x.shape[1],1, x.shape[2], x.shape[3]]#, x.shape[4]]
+        x = x.reshape(new_shape)
+        new_shape = [condition.shape[0] * condition.shape[1], 1, condition.shape[2]]
+        new_shape = [condition.shape[0] * condition.shape[1], condition.shape[2]]
+        condition = condition.reshape(new_shape)
+
+        c1 = self.emb1(condition)
+        c2 = self.emb2(condition)
+        # print('----')
+        # print(c1.shape)
+        # print(x.shape)
+        
+        # print('----')
+        # print(c1[:,:,None,None])
+
+        # x = act(self.bn1(self.conv1(x)), self.activation) + c1[:, :, None]
+        x = act(self.bn1(self.conv1(x)), self.activation) + c1[:, :, None, None]
+        # x = act(self.bn2(self.conv2(x)), self.activation) + c2[:, :, None]
+        x = act(self.bn2(self.conv2(x)), self.activation) + c2[:, :, None, None]
         #####
-        c1_ = self.emb_conv1(condition)
-        c1 = self.emb1(c1_)
-        c2_ = self.emb_conv2(condition)
-        c2 = self.emb2(c2_)
-        x = act(self.bn1(self.conv1(x)), self.activation) + c1[:, :, None]
-        x = act(self.bn2(self.conv2(x)), self.activation) + c2[:, :, None]
+        # c1_ = self.emb_conv1(condition)
+        # c1 = self.emb1(c1_)
+        # c2_ = self.emb_conv2(condition)
+        # c2 = self.emb2(c2_)
+        # x = act(self.bn1(self.conv1(x)), self.activation) + c1[:, :, None]
+        # x = act(self.bn2(self.conv2(x)), self.activation) + c2[:, :, None]
         #####
         
         return x
@@ -219,7 +234,7 @@ class ZeroShotASP(pl.LightningModule):
     dataset (module): the dataset variable to control the randomness in each epoch (not affect in evaluation mode) 
     '''
     # def __init__(self, config, at_model, dataset, channels=100):
-    def __init__(self, config, channels=99):
+    def __init__(self, config, channels=9):
         super().__init__()
 
         # hyper parameters
@@ -257,7 +272,8 @@ class ZeroShotASP(pl.LightningModule):
 
         self.bn0 = nn.BatchNorm2d(window_size // 2 + 1, momentum=momentum)
 
-        self.encoder_block1 = EncoderBlock(in_channels=channels, out_channels=32, 
+        # self.encoder_block1 = EncoderBlock(in_channels=channels, out_channels=32, 
+        self.encoder_block1 = EncoderBlock(in_channels=1, out_channels=32, 
             downsample=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
         self.encoder_block2 = EncoderBlock(in_channels=32, out_channels=64, 
             downsample=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
@@ -315,12 +331,14 @@ class ZeroShotASP(pl.LightningModule):
         # for channel in range(channels_num):
         #     sp_list.append(self.spectrogram(input[:, :, channel]))
         #####
+        # for i in range(input.shape[0]):
         for _ in range(self.channels):
             sp_list.append(self.spectrogram(input[:,:,0]))
         #####
         # output = torch.cat(sp_list, dim=1)
         #####
-        output = torch.stack(sp_list, dim=1)
+        output = torch.cat(sp_list, dim=1)
+        # output = output.reshape((output.shape[0],output.shape[1],1,output.shape[2],output.shape[3]))
         return output
 
 
@@ -357,10 +375,13 @@ class ZeroShotASP(pl.LightningModule):
         """
         sp = self.wav_to_spectrogram(input)    
         """(batch_size, channels_num, time_steps, freq_bins)"""
+        print(sp.shape)
 
         # Batch normalization
         x = sp.transpose(1, 3)
+        print(x.shape)
         x = self.bn0(x)
+        print(x.shape)
         x = x.transpose(1, 3)
         """(batch_size, chanenls, time_steps, freq_bins)"""
 
@@ -609,12 +630,13 @@ class ZeroShotASP(pl.LightningModule):
 
 
 class LAAS(pl.LightningModule):
-    def __init__(self):
+    def __init__(self,config):
+        super().__init__()
         self.urls = {
-            'vggish': './torchvggish/cp/vggish-10086976.pth',
-            'pca': './torchvggish/cp/vggish_pca_params-970ea276.pth'
+            'vggish': '../ckpt/vggish-10086976.pth',
+            'pca': '../ckpt/vggish_pca_params-970ea276.pth'
             }
-        self.ASP = ZeroShotASP()
+        self.ASP = ZeroShotASP(config=config)
         self.VGGish = vggish.VGGish(self.urls)
 
         for param in self.VGGish.parameters():
@@ -629,7 +651,8 @@ class LAAS(pl.LightningModule):
         conditions = quries
         
         # x = separated audios
-        x = self.ASP(input["audio"], conditions)['sp'].detach().numpy()#.reshape(channels, length)
+        # x = self.ASP(input["audio"], conditions)['sp'].detach().numpy()#.reshape(channels, length)
+        x = self.ASP(input=input["audio"], condition=input["conditions"])['sp'].detach().numpy()#.reshape(channels, length)
         
         # 버리는 audio
         x = x[:-1]
