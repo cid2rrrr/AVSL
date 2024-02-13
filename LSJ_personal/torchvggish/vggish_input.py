@@ -99,21 +99,61 @@ def wavfile_to_examples(wav_file, return_tensor=True):
 
 
 def fft_to_examples(fft, return_tensor=True, log_offset=0):
-    log_spec = np.dot(fft, mel_features.spectrogram_to_mel_matrix(
+
+    # mel_spectrogram = np.dot(spectrogram, spectrogram_to_mel_matrix(
+    #   num_spectrogram_bins=spectrogram.shape[1],
+    #   audio_sample_rate=audio_sample_rate, **kwargs))
+    # return np.log(mel_spectrogram + log_offset)
+
+    mel = np.dot(fft, mel_features.spectrogram_to_mel_matrix(
+        num_mel_bins=vggish_params.NUM_MEL_BINS,
         num_spectrogram_bins=fft.shape[1],
         audio_sample_rate=vggish_params.SAMPLE_RATE,
-        log_offset=vggish_params.LOG_OFFSET,
-        window_length_secs=vggish_params.STFT_WINDOW_LENGTH_SECONDS,
-        hop_length_secs=vggish_params.STFT_HOP_LENGTH_SECONDS,
-        num_mel_bins=vggish_params.NUM_MEL_BINS,
         lower_edge_hertz=vggish_params.MEL_MIN_HZ,
         upper_edge_hertz=vggish_params.MEL_MAX_HZ))
-    
-    log_mel_examples =  np.log(log_spec + log_offset)
+
+        # log_offset=vggish_params.LOG_OFFSET,
+        # window_length_secs=vggish_params.STFT_WINDOW_LENGTH_SECONDS,
+        # hop_length_secs=vggish_params.STFT_HOP_LENGTH_SECONDS,
+        
+    log_mel = np.log(mel + vggish_params.LOG_OFFSET)
+    features_sample_rate = 1.0 / vggish_params.STFT_HOP_LENGTH_SECONDS
+    example_window_length = int(round(
+        vggish_params.EXAMPLE_WINDOW_SECONDS * features_sample_rate))
+    example_hop_length = int(round(
+        vggish_params.EXAMPLE_HOP_SECONDS * features_sample_rate))
+    log_mel_examples = mel_features.frame(
+        log_mel,
+        window_length=example_window_length,
+        hop_length=example_hop_length)
 
     if return_tensor:
         log_mel_examples = torch.tensor(
-            log_mel_examples, requires_grad=True)[:,None,:,:].float()
-    
+            log_mel_examples, requires_grad=True)[:, None, :, :].float()
+
     return log_mel_examples
+
+
+
+    # log_offset = vggish_params.LOG_OFFSET
+    # # log_mel_examples =  np.log(log_spec + log_offset)
+
+
+    # features_sample_rate = 1.0 / vggish_params.STFT_HOP_LENGTH_SECONDS
+    # example_window_length = int(round(
+    #     vggish_params.EXAMPLE_WINDOW_SECONDS * features_sample_rate))
+    # example_hop_length = int(round(
+    #     vggish_params.EXAMPLE_HOP_SECONDS * features_sample_rate))
+    # log_mel_examples = mel_features.frame(
+    #     log_mel,
+    #     window_length=example_window_length,
+    #     hop_length=example_hop_length)
+
+
+    # if return_tensor:
+    #     log_mel_examples = torch.tensor(
+    #         # log_mel_examples, requires_grad=True)[:,None,:,:].float()
+    #         log_mel_examples, requires_grad=True)[None,:,:].float()
+    
+    # return log_mel_examples
 

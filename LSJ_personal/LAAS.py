@@ -143,11 +143,11 @@ class ConvBlock(nn.Module):
 
     # latent query embedded 
     def forward(self, x, condition):
-        new_shape = [x.shape[0] * x.shape[1],1, x.shape[2], x.shape[3]]#, x.shape[4]]
-        x = x.reshape(new_shape)
-        new_shape = [condition.shape[0] * condition.shape[1], 1, condition.shape[2]]
-        new_shape = [condition.shape[0] * condition.shape[1], condition.shape[2]]
-        condition = condition.reshape(new_shape)
+        # new_shape = [x.shape[0] * x.shape[1],1, x.shape[2], x.shape[3]]#, x.shape[4]]
+        # x = x.reshape(new_shape)
+        # new_shape = [condition.shape[0] * condition.shape[1], 1, condition.shape[2]]
+        # new_shape = [condition.shape[0] * condition.shape[1], condition.shape[2]]
+        # condition = condition.reshape(new_shape)
 
         c1 = self.emb1(condition)
         c2 = self.emb2(condition)
@@ -303,7 +303,8 @@ class ZeroShotASP(pl.LightningModule):
         self.after_conv_block1 = ConvBlock(in_channels=32, out_channels=32, 
             size=3, activation=activation, momentum=momentum, classes_num = config.latent_dim)
 
-        self.after_conv2 = nn.Conv2d(in_channels=32, out_channels=channels, 
+        # self.after_conv2 = nn.Conv2d(in_channels=32, out_channels=channels, 
+        self.after_conv2 = nn.Conv2d(in_channels=32, out_channels=1, 
             kernel_size=(1, 1), stride=(1, 1), padding=(0, 0), bias=True)
 
         self.init_weights()
@@ -338,8 +339,8 @@ class ZeroShotASP(pl.LightningModule):
         # output = torch.cat(sp_list, dim=1)
         #####
         output = torch.cat(sp_list, dim=1)
-        # output = output.reshape((output.shape[0],output.shape[1],1,output.shape[2],output.shape[3]))
-        return output
+        outputt = output.reshape((output.shape[0] * output.shape[1],1,output.shape[2],output.shape[3]))
+        return outputt
 
 
     def spectrogram_to_wav(self, input, spectrogram, length=None):
@@ -352,6 +353,11 @@ class ZeroShotASP(pl.LightningModule):
         Outputs:
           output: (batch_size, segment_samples, channels_num)
         """
+        #####
+        input = torch.stack([input for _ in range(self.channels)], dim=0)
+        input = input.reshape((input.shape[0]*input.shape[1], input.shape[2], input.shape[3]))
+        #####
+
         channels_num = input.shape[2]
         wav_list = []
         for channel in range(channels_num):
@@ -362,6 +368,9 @@ class ZeroShotASP(pl.LightningModule):
         
         output = torch.stack(wav_list, dim=2)
         return output
+
+    def reshape_condition(self, condition):
+        return condition.reshape(condition.shape[0]*condition.shape[1], condition.shape[2])
 
     def forward(self, input, condition):
         """
@@ -395,6 +404,8 @@ class ZeroShotASP(pl.LightningModule):
         # Let frequency bins be evenly divided by 2, e.g., 513 -> 512
         x = x[..., 0 : x.shape[-1] - 1]     # (bs, channels, T, F)
 
+        # change condition shape
+        condition = self.reshape_condition(condition)
         # UNet
         (x1_pool, x1) = self.encoder_block1(x, condition)  # x1_pool: (bs, 32, T / 2, F / 2)
         (x2_pool, x2) = self.encoder_block2(x1_pool, condition)    # x2_pool: (bs, 64, T / 4, F / 4)
@@ -655,13 +666,19 @@ class LAAS(pl.LightningModule):
         x = self.ASP(input=input["audio"], condition=input["conditions"])['sp'].detach().numpy()#.reshape(channels, length)
         
         # 버리는 audio
-        x = x[:-1]
+        # x = x[:-1]
+        n_plus_one = 9
+        indices_to_exclude = list(range(n_plus_one -1, x.shape[0], n_plus_one))
+        x = torch.index_select(torch.from_numpy(x), 0, torch.tensor([i for i in range(x.shape[0]) if i not in indices_to_exclude])).squeeze()
         
-        audio_features = []
-        for i in range(x.shape[0]):
-            audio_features.append(self.VGGish(x[i], fs=16000))
-        # x = self.VGGish(x, fs=16000)
 
-        # do other things
+        return x
+        # audio_features = []
+        # for i in range(x.shape[0]):
+        #     audio_features.append(self.VGGish(x[i], fs=16000))
+        # audio_features = torch.stack(audio_features)
+
+        # # do other things
+        # return audio_features
 
         

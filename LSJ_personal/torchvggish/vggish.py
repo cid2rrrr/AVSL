@@ -182,7 +182,7 @@ class VGGish(VGG):
             x = vggish_input.waveform_to_examples(x, fs)
         elif isinstance(x, str):
             x = vggish_input.wavfile_to_examples(x)
-        elif isinstance(x, torch.tensor):
+        elif isinstance(x, torch.Tensor):
             x = vggish_input.fft_to_examples(x)
         else:
             raise AttributeError
