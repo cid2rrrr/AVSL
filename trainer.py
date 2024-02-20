@@ -47,7 +47,7 @@ class Trainer(DefaultTrainer):
     
     # our dataloader, since we do not use a mapper
     def build_train_loader():
-        train_loader = dataloader
+        train_loader = dataloader()
         return train_loader
 
     # initial detectron2 version
@@ -153,18 +153,31 @@ def setup(args):
     cfg.merge_from_list(args.opts)
     cfg.freeze()
     default_setup(cfg, args)
-    # Setup logger for "mask_former" module
-    setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="mask2former")
+    # Setup logger
+    setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="avsl")
     return cfg             
 
-"""  
+ 
 def main(args):
     cfg = setup(args)
 
+    if args.eval_only:
+        model = Trainer.build_model(cfg)
+        DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
+            cfg.MODEL.WEIGHTS, resume=args.resume
+        )
+        res = Trainer.test(cfg, model)
+        if cfg.TEST.AUG.ENABLED:
+            res.update(Trainer.test_with_TTA(cfg, model))
+        if comm.is_main_process():
+            verify_results(cfg, res)
+        return res
+    trainer = Trainer(cfg)
+    trainer.resume_or_load(resume = arg.resume) # load last checkpoint or MODEL.WEIGHTS
     return trainer.train()
 
 if __name__ == "__main__":
-    args = 
+    args = default_argument_parser().parse_args()
     print("Command Line Args:", args)
     launch(
         main,
@@ -174,4 +187,4 @@ if __name__ == "__main__":
         dist_url=args.dist_url,
         args=(args,),
     )
-"""      
+ 
