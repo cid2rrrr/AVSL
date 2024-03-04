@@ -10,3 +10,17 @@ models/Mask2former/
 *.imsi
 *.log
 *.pyc
+/workspace/GitHub/AVSL/junk/
+./junk/
+./DATA/
+./dataset_chunk/
+/workspace/GitHub/AVSL/dataset_chunk/
+./IMGs/
+/workspace/GitHub/AVSL/IMGs/
+./pickle/
+./results/
+DATA/
+*.txt
+*.csv
+*.pickle
+*.arch

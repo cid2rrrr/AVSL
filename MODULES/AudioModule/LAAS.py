@@ -224,7 +224,8 @@ class DecoderBlock(nn.Module):
 
 
 
-class ZeroShotASP(pl.LightningModule):
+# class ZeroShotASP(pl.LightningModule):
+class ZeroShotASP(nn.Module):
 # class ZeroShotASP():
     '''
     Args:
@@ -272,7 +273,9 @@ class ZeroShotASP(pl.LightningModule):
 
         self.bn0 = nn.BatchNorm2d(window_size // 2 + 1, momentum=momentum)
 
+        
         # self.encoder_block1 = EncoderBlock(in_channels=channels, out_channels=32, 
+        ###!!!###!!!###
         # self.encoder_block1 = EncoderBlock(in_channels=1, out_channels=32, 
         #     downsample=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
         # self.encoder_block2 = EncoderBlock(in_channels=32, out_channels=64, 
@@ -306,40 +309,42 @@ class ZeroShotASP(pl.LightningModule):
         # # self.after_conv2 = nn.Conv2d(in_channels=32, out_channels=channels, 
         # self.after_conv2 = nn.Conv2d(in_channels=32, out_channels=1, 
         #     kernel_size=(1, 1), stride=(1, 1), padding=(0, 0), bias=True)
-        
+        ###!!!###!!!###
 
-        self.encoder_block1 = EncoderBlock(in_channels=1, out_channels=2, 
+        ###!!!###!!!###
+        self.encoder_block1 = EncoderBlock(in_channels=1, out_channels=4, 
             downsample=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        self.encoder_block2 = EncoderBlock(in_channels=2, out_channels=4, 
+        self.encoder_block2 = EncoderBlock(in_channels=4, out_channels=8, 
             downsample=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        self.encoder_block3 = EncoderBlock(in_channels=4, out_channels=8, 
+        self.encoder_block3 = EncoderBlock(in_channels=8, out_channels=16, 
             downsample=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        self.encoder_block4 = EncoderBlock(in_channels=8, out_channels=16, 
+        self.encoder_block4 = EncoderBlock(in_channels=16, out_channels=32, 
             downsample=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        # self.encoder_block5 = EncoderBlock(in_channels=16, out_channels=32, 
+        # self.encoder_block5 = EncoderBlock(in_channels=32, out_channels=64, 
         #     downsample=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
         # self.encoder_block6 = EncoderBlock(in_channels=32, out_channels=64, 
         #     downsample=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        self.conv_block7 = ConvBlock(in_channels=16, out_channels=32, 
+        self.conv_block7 = ConvBlock(in_channels=32, out_channels=64, 
             size=3, activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        # self.decoder_block1 = DecoderBlock(in_channels=512, out_channels=256, 
+        # self.decoder_block1 = DecoderBlock(in_channels=128, out_channels=64, 
         #     stride=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        # self.decoder_block2 = DecoderBlock(in_channels=256, out_channels=128, 
+        # self.decoder_block2 = DecoderBlock(in_channels=128, out_channels=64, 
         #     stride=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        self.decoder_block3 = DecoderBlock(in_channels=32, out_channels=16, 
+        self.decoder_block3 = DecoderBlock(in_channels=64, out_channels=32, 
             stride=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        self.decoder_block4 = DecoderBlock(in_channels=16, out_channels=8, 
+        self.decoder_block4 = DecoderBlock(in_channels=32, out_channels=16, 
             stride=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        self.decoder_block5 = DecoderBlock(in_channels=8, out_channels=4, 
+        self.decoder_block5 = DecoderBlock(in_channels=16, out_channels=8, 
             stride=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
-        self.decoder_block6 = DecoderBlock(in_channels=4, out_channels=2, 
+        self.decoder_block6 = DecoderBlock(in_channels=8, out_channels=4, 
             stride=(2, 2), activation=activation, momentum=momentum, classes_num = config.latent_dim)
 
-        self.after_conv_block1 = ConvBlock(in_channels=2, out_channels=2, 
+        self.after_conv_block1 = ConvBlock(in_channels=4, out_channels=2, 
             size=3, activation=activation, momentum=momentum, classes_num = config.latent_dim)
         
         self.after_conv2 = nn.Conv2d(in_channels=2, out_channels=1, 
             kernel_size=(1, 1), stride=(1, 1), padding=(0, 0), bias=True)
+        ###!!!###!!!###
 
         self.init_weights()
 
@@ -441,6 +446,7 @@ class ZeroShotASP(pl.LightningModule):
         # change condition shape
         condition = self.reshape_condition(condition)
         # UNet
+        ###!!!###!!!###
         # (x1_pool, x1) = self.encoder_block1(x, condition)  # x1_pool: (bs, 32, T / 2, F / 2)
         # (x2_pool, x2) = self.encoder_block2(x1_pool, condition)    # x2_pool: (bs, 64, T / 4, F / 4)
         # (x3_pool, x3) = self.encoder_block3(x2_pool, condition)    # x3_pool: (bs, 128, T / 8, F / 8)
@@ -456,7 +462,9 @@ class ZeroShotASP(pl.LightningModule):
         # x12 = self.decoder_block6(x11, x1, condition)  # (bs, 32, T, F)
         # x = self.after_conv_block1(x12, condition)     # (bs, 32, T, F)
         # x = self.after_conv2(x)             # (bs, channels, T, F)
+        ###!!!###!!!###
 
+        ###!!!###!!!###
         (x_pool, x1) = self.encoder_block1(x, condition)  # x1_pool: (bs, 32, T / 2, F / 2)
         (x_pool, x2) = self.encoder_block2(x_pool, condition)    # x2_pool: (bs, 64, T / 4, F / 4)
         (x_pool, x3) = self.encoder_block3(x_pool, condition)    # x3_pool: (bs, 128, T / 8, F / 8)
@@ -474,6 +482,7 @@ class ZeroShotASP(pl.LightningModule):
         # del x1, x2, x3, x4, x5, x6
         # torch.cuda.empty_cache()
         x = self.after_conv2(x)             # (bs, channels, T, F)
+        ###!!!###!!!###
 
         # Recover shape
         x = F.pad(x, pad=(0, 1))

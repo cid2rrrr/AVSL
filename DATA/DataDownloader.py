@@ -9,7 +9,7 @@ from moviepy.video.io.VideoFileClip import VideoFileClip
 CSV_PATH = '/workspace/GitHub/AVSL/dataset_chunk/chunk_1.csv'
 OUTPUT_PATH = './videos' # need to change to server dir to save the clips
 START_INDEX = 0
-log_index = 46280 # stopped index
+log_index = 50092 # stopped index
 
 def download_and_trim_video(cnt, youtube_id, output_folder, start_time_seconds, end_time_seconds):
     cnt += START_INDEX

@@ -1,15 +1,28 @@
 import torch
+import os
 
+from fvcore.common.checkpoint import Checkpointer
 from detectron2.layers import ShapeSpec
 from .MaskFormer.modeling.backbone.swin import D2SwinTransformer
 
-def build_swin_backbone(cfg, pixel_mean):
+def build_swin_backbone(cfg, pixel_mean, weight_path = None):
     """
     pixel_mean = cfg.MODEL.PIXEL_MEAN
+    weight_path = cfg.MODEL.WEIGHTS
     """
     input_shape = ShapeSpec(channels=len(pixel_mean)) 
     model = D2SwinTransformer(cfg, input_shape)
-    model.init_weights(cfg.MODEL.WEIGHTS) # 이렇게 하면 안됨. 고쳐야 함.
+
+    if weight_path is not None:
+        checkpoint = torch.load(os.path.join("MODULES/ckpt", weight_path))
+        checkpointer = Checkpointer(model)
+        checkpointer._convert_ndarray_to_tensor(checkpoint["model"])
+
+        try:
+            model.load_state_dict(checkpoint["model"])
+        except:
+            pass
+
     return model
 # backbone = build_swin_backbone(cfg)
 
@@ -27,15 +40,22 @@ def build_pixel_decoder(cfg, input_shape):
 
 from .MaskFormer.modeling.transformer.mask_predictor import MaskPredictor
 
-def build_mask_predictor(cfg, in_channels, audiomodule_weight):
+def build_mask_predictor(cfg, in_channels):
     """
     in_channles = cfg.MODEL.SEM_SEG_HEAD.CONVS_DIM
-    audio_module_weight = {
-            'vggish': 'ckpt/vggish-10086976.pth',
-            'pca': 'ckpt/vggish_pca_params-970ea276.pth'
-            }
     """
-    model = MaskPredictor(cfg, in_channels, audiomodule_weight)
+    model = MaskPredictor(cfg, in_channels)
     return model
-# mask_predictor = MaskPredictor(cfg, cfg.MODEL.SEM_SEG_HEAD.CONVS_DIM, audiomodule_weight)
+# mask_predictor = MaskPredictor(cfg, cfg.MODEL.SEM_SEG_HEAD.CONVS_DIM)
+
+
+from .MaskFormer.modeling.transformer.mask_predictor_light import MaskPredictorLight
+
+def build_mask_predictor_light(cfg, in_channels):
+    """
+    in_channles = cfg.MODEL.SEM_SEG_HEAD.CONVS_DIM
+    """
+    model = MaskPredictorLight(cfg, in_channels)
+    return model
+# mask_predictor = MaskPredictorLight(cfg, backbone.output_shape()[cfg.MODEL.MASK_FORMER.TRANSFORMER_IN_FEATURE].channels)
 

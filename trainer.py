@@ -1,223 +1,339 @@
-# same trainer format as backbone maskformer
-# to reuse the get_cfg function
-# evaluation part is omitted
-try:
-    # ignore ShapelyDeprecationWarning from fvcore
-    from shapely.errors import ShapelyDeprecationWarning
-    import warnings
-    warnings.filterwarnings('ignore', category=ShapelyDeprecationWarning)
-except:
-    pass
-
-import copy
-import itertools
-import logging
-import os
-
-from collections import OrderedDict
-from typing import Any, Dict, List, Set
-
+import os, pickle
+from tqdm import tqdm, trange
 import torch
-import detectron2.utils.comm as comm
-from detectron2.checkpoint import DetectionCheckpointer # for frozen backbone
-from detectron2.config import get_cfg # get_cfg function to load parameters
-from detectron2.engine import (
-    DefaultTrainer,
-    default_argument_parser,
-    default_setup,
-    launch,
-)
+from torch import nn
+from torch.optim import Adam, lr_scheduler
+import numpy as np
+from tqdm.auto import tqdm
 
-# initially same as maskformer
-from detectron2.projects.deeplab import add_deeplab_config, build_lr_scheduler
-from detectron2.solver.build import maybe_add_gradient_clipping
-from detectron2.utils.logger import setup_logger
+from MODULES.AVSL_model import AVSLModel
+from MODULES import utils
+from MODULES.utils import EvaluatorFull, AverageMeter
 
-# avsl version, we do not use a dataset mapper
-from AVSL import (
-    dataloader,
-    add_avsl_config, # do we need this?
-)
+from DATALOADER import VideoDataLoader
 
-class Trainer(DefaultTrainer):
-    """
-    Extension of the Trainer class adapted to AVSL.
-    """
-    # instead of evaluation we use the loss as supervision
-    #def ...
-    
-    # our dataloader, since we do not use a mapper
-    def build_train_loader():
-        train_loader = dataloader()
-        return train_loader
+from get_path import get_file_paths
+from Evaluation_DATALOADER import EvaluationDataLoader
+from MUSIC_DATALOADER import MUSICDataLoader
+from mir_eval.separation import bss_eval_sources
+from detectron2.utils.visualizer import ColorMode, Visualizer, GenericMask, VisImage
+import matplotlib.colors as mplc
+from detectron2.utils.colormap import random_color
 
-    # initial detectron2 version
-    def build_lr_scheduler(cls, cfg, optimizer):
-        """
-        It now calls :func:`detectron2.solver.build_lr_scheduler`.
-        Overwrite it if you'd like a different scheduler.
-        """
-        return build_lr_scheduler(cfg, optimizer)
-         
-    # need adjustments, tunning
-    def build_optimizer(cls, cfg, model):
-        weight_decay_norm = cfg.SOLVER.WEIGHT_DECAY_NORM
-        weight_decay_embed = cfg.SOLVER.WEIGHT_DECAY_EMBED
+SAVE_DIR = './pickle/0228test'
 
-        defaults = {}
-        defaults["lr"] = cfg.SOLVER.BASE_LR
-        defaults["weight_decay"] = cfg.SOLVER.WEIGHT_DECAY
+class Trainer:
+    def __init__(self, cfg):
 
-        norm_module_types = (
-            torch.nn.BatchNorm1d,
-            torch.nn.BatchNorm2d,
-            torch.nn.BatchNorm3d,
-            torch.nn.SyncBatchNorm,
-            # NaiveSyncBatchNorm inherits from BatchNorm2d
-            torch.nn.GroupNorm,
-            torch.nn.InstanceNorm1d,
-            torch.nn.InstanceNorm2d,
-            torch.nn.InstanceNorm3d,
-            torch.nn.LayerNorm,
-            torch.nn.LocalResponseNorm,
+        self.device = torch.device(cfg.MODEL.DEVICE)
+
+        self.model = AVSLModel(cfg, training=True)
+        self.model.zero_grad()
+
+        self.optimizer = torch.optim.Adam(
+            self.model.parameters(),    
+            lr=0.003               
         )
 
-        params: List[Dict[str, Any]] = []
-        memo: Set[torch.nn.parameter.Parameter] = set()
-        for module_name, module in model.named_modules():
-            for module_param_name, value in module.named_parameters(recurse=False):
-                if not value.requires_grad:
-                    continue
-                # Avoid duplicating parameters
-                if value in memo:
-                    continue
-                memo.add(value)
-
-                hyperparams = copy.copy(defaults)
-                if "backbone" in module_name:
-                    hyperparams["lr"] = hyperparams["lr"] * cfg.SOLVER.BACKBONE_MULTIPLIER
-                if (
-                    "relative_position_bias_table" in module_param_name
-                    or "absolute_pos_embed" in module_param_name
-                ):
-                    print(module_param_name)
-                    hyperparams["weight_decay"] = 0.0
-                if isinstance(module, norm_module_types):
-                    hyperparams["weight_decay"] = weight_decay_norm
-                if isinstance(module, torch.nn.Embedding):
-                    hyperparams["weight_decay"] = weight_decay_embed
-                params.append({"params": [value], **hyperparams})
-
-        def maybe_add_full_model_gradient_clipping(optim):
-            # detectron2 doesn't have full model gradient clipping now
-            clip_norm_val = cfg.SOLVER.CLIP_GRADIENTS.CLIP_VALUE
-            enable = (
-                cfg.SOLVER.CLIP_GRADIENTS.ENABLED
-                and cfg.SOLVER.CLIP_GRADIENTS.CLIP_TYPE == "full_model"
-                and clip_norm_val > 0.0
-            )
-
-            class FullModelGradientClippingOptimizer(optim):
-                def step(self, closure=None):
-                    all_params = itertools.chain(*[x["params"] for x in self.param_groups])
-                    torch.nn.utils.clip_grad_norm_(all_params, clip_norm_val)
-                    super().step(closure=closure)
-
-            return FullModelGradientClippingOptimizer if enable else optim
-
-        optimizer_type = cfg.SOLVER.OPTIMIZER
-        if optimizer_type == "SGD":
-            optimizer = maybe_add_full_model_gradient_clipping(torch.optim.SGD)(
-                params, cfg.SOLVER.BASE_LR, momentum=cfg.SOLVER.MOMENTUM
-            )
-        elif optimizer_type == "ADAMW":
-            optimizer = maybe_add_full_model_gradient_clipping(torch.optim.AdamW)(
-                params, cfg.SOLVER.BASE_LR
-            )
-        else:
-            raise NotImplementedError(f"no optimizer type {optimizer_type}")
-        if not cfg.SOLVER.CLIP_GRADIENTS.CLIP_TYPE == "full_model":
-            optimizer = maybe_add_gradient_clipping(cfg, optimizer)
-        return optimizer
-    
-    def train_step(self):
-        """
-        Implement the logic for one train step.
-        """
-        data = next(self._data_loader_iter)
-        data = self.preprocess_batch(data)
-        data = self.model(data)
-        
-        # Extract necessary data from the model output
-        audio_gt = ...
-        x = ...
-        N = ...
-        audio_features = ...
-        D = ...
-        masks = ...
-        mask_embedding = ...
-        mask_features = ...
-        batch_size = ...
-
-        # Compute the loss using SetCriterion
-        loss = self.criterion(audio_gt, x, N, audio_features, D, masks, mask_embedding, mask_features, batch_size)
-        
-        # optimization logic e.g., backward pass and optimizer step
-        self.optimizer()
-        loss.backward()
-        self.optimizer.step()
-        
-        return {"loss": loss.item()}  # Return the loss value for logging
-
-# setup function using get_cfg to load parameters
-def setup(args):
-    """
-    Create configs and perform basic setups.
-    """
-    cfg = get_cfg()
-    # for poly lr schedule
-    add_deeplab_config(cfg)
-    add_avsl_config(cfg)
-    #add_maskformer2_config(cfg)
-    cfg.merge_from_file(args.config_file)
-    cfg.merge_from_list(args.opts)
-    cfg.freeze()
-    default_setup(cfg, args)
-    # Setup logger
-    setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="avsl")
-    return cfg             
-
- 
-def main(args):
-    cfg = setup(args)
-
-    if args.eval_only:
-        model = Trainer.build_model(cfg)
-        DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
-            cfg.MODEL.WEIGHTS, resume=args.resume
+        self.scheduler = lr_scheduler.StepLR(
+            self.optimizer,             
+            step_size=100,         
+            gamma=0.9              
         )
-        res = Trainer.test(cfg, model)
-        if cfg.TEST.AUG.ENABLED:
-            res.update(Trainer.test_with_TTA(cfg, model))
-        if comm.is_main_process():
-            verify_results(cfg, res)
-        return res
-    trainer = Trainer(cfg)
-    trainer.resume_or_load(resume = arg.resume) # load last checkpoint or MODEL.WEIGHTS
-    return trainer.train()
+        
+        folder_path = cfg.SOLVER.DATA_FOLDER
+        self.train_dataloader = VideoDataLoader(cfg, folder_path, cfg.SOLVER.IMS_PER_BATCH)
 
-if __name__ == "__main__":
-    args = default_argument_parser().parse_args()
-    print("Command Line Args:", args)
-    launch(
-        main,
-        args.num_gpus,
-        num_machines=args.num_machines,
-        machine_rank=args.machine_rank,
-        dist_url=args.dist_url,
-        args=(args,),
-    )
- 
-"""
-python trainer.py --num-gpus <num_gpus> --num-machines <num_machines> --machine-rank <machine_rank> --dist-url <dist_url> ...
-"""
+        self.history = []
+        self.num_tokens = cfg.MODEL.MASK_FORMER.NUM_OBJECT_TOKENS
+        #######################
+
+
+    def train(self, epochs):
+        self.model.train()
+        total_step = len(self.train_dataloader)
+        
+        for epoch in range(epochs):
+    
+            for i, batch in enumerate(self.train_dataloader):
+                
+                loss = self.model(batch, mode='train')
+                losses = torch.tensor(0)
+                for key in loss.keys():
+                    losses = losses + loss[key]
+
+                # Backward and optimize
+                self.optimizer.zero_grad()
+                losses = losses.to(self.device)
+                losses.backward() 
+                self.optimizer.step()
+                # if i%100 == 0:
+                if i%1000 == 0:
+                    self.history.append(loss)
+
+                    file_name = 'epoch_' + str(epoch) + '_batch_' + str(i) 
+                    pickle_name = file_name + '.pickle'
+                    pickle_path = os.path.join(SAVE_DIR, pickle_name)
+                    with open (pickle_path, 'wb') as f:
+                        pickle.dump(loss, f)
+                    
+                    weight_name = file_name + '.pth'
+                    weight_path = os.path.join(SAVE_DIR, weight_name)
+                    torch.save(self.model.state_dict(), weight_path)
+
+                    print('Epoch [{}/{}], Step [{}/{}], Loss: {}'
+                        .format(epoch + 1, epochs, i + 1, total_step, loss))
+    
+    def urmp_evaluate(self, cfg, vizualization=False):
+        self.model.eval()
+
+        # URMP dataset load
+        eval_dataloader = EvaluationDataLoader(cfg, cfg.TEST.DATA_FOLDER, cfg.TEST.IMS_PER_BATCH)
+
+        # for separation
+        sdr_mix_meter = AverageMeter()
+        sdr_meter = AverageMeter()
+        sir_meter = AverageMeter()
+        sar_meter = AverageMeter()
+    
+        for i, batch in tqdm(enumerate(eval_dataloader)):
+            if len(batch["separated_audio_paths"]) > self.num_tokens:
+                continue
+            mixed_audio, sep_audio_gts, outputs, _ = self.model(batch, mode='eval')
+            sdr_mix, sdr, sir, sar = calc_sep_metrics(mixed_audio, sep_audio_gts, outputs)
+            
+        sdr_mix_meter.update(sdr_mix)
+        sdr_meter.update(sdr)
+        sir_meter.update(sir)
+        sar_meter.update(sar)
+
+        print('[Eval Summary]'
+        'SDR_mixture: {:.4f}, SDR: {:.4f}, SIR: {:.4f}, SAR: {:.4f}'
+        .format(sdr_mix_meter.average(),
+                sdr_meter.average(),
+                sir_meter.average(),
+                sar_meter.average()))
+        
+        if vizualization == True:
+            _, _, _, processed_results = self.model(batch, mode='eval', visualization=True)
+            visualized_output = visualize_mask(batch["image"][0], processed_results)  
+            return visualized_output
+        
+
+    def music_evaluate(self, cfg, vizualization=False):
+        self.model.eval()
+
+        # MUSIC dataset load
+        eval_dataloader = MUSICDataLoader("DATA/MUSIC_DUET/frames/", "DATA/MUSIC_DUET/audios",
+                                          "DATA/metadata/music_duet.json", cfg.TEST.IMS_PER_BATCH)
+        
+        # for localization
+        evaluator_0 = EvaluatorFull()
+        evaluator_1 = EvaluatorFull()
+        best_precision, best_ap, best_f1 = 0., 0., 0.
+    
+        for i, batch in tqdm(enumerate(eval_dataloader)):
+            if batch["bboxes"]["gt_map"].shape[1] > self.num_tokens:
+                continue
+            _, _, outputs, _ = self.model(batch, mode='eval')
+            calc_loc_metrics(batch["bboxes"], outputs, evaluator_0, evaluator_1)
+            
+        precision = (evaluator_0.precision_at_10() + evaluator_1.precision_at_10()) / 2
+        ap = (evaluator_0.piap_average() + evaluator_1.piap_average()) / 2
+        f1 = (evaluator_0.f1_at_30() + evaluator_1.f1_at_30()) / 2
+        if precision > best_precision:
+            best_precision, best_ap, best_f1 = precision, ap, f1
+
+        print('[Eval Summary]'
+        'Precision: {:.4f}, AP: {:.4f}, F1: {:.4f}'.format(precision, ap, f1))
+        print('best Precision: {:.4f}, best AP: {:.4f}, best F1: {:.4f}'.format(best_precision, best_ap, best_f1))
+        
+        if vizualization == True:
+            _, _, _, processed_results = self.model(batch, mode='eval', visualization=True)
+            visualized_output = visualize_mask(batch["image"][0], processed_results)  
+            return visualized_output
+
+
+def calc_sep_metrics(mixed_audio, sep_audio_gts, outputs):
+    # meters
+    sdr_mix_meter = AverageMeter()
+    sdr_meter = AverageMeter()
+    sir_meter = AverageMeter()
+    sar_meter = AverageMeter()
+
+    B = mixed_audio.shape[0] #1
+
+    # loop over each sample
+    for b in range(B):
+        N = sep_audio_gts.shape[1]
+
+        gts_wav = [None for n in range(N)]
+        preds_wav = [t.data.cpu().numpy() for t in outputs["sep_audio_wavs_wo_noise"][b][:N]]
+        valid=True
+        for n in range(N):
+            gts_wav[n] = sep_audio_gts[b][n].data.cpu().numpy()
+            valid *= np.sum(np.abs(gts_wav[n])) > 1e-5
+            valid *= np.sum(np.abs(preds_wav[n])) > 1e-5
+        sdr, sir, sar, _ = bss_eval_sources(
+                np.asarray(gts_wav),
+                np.asarray(preds_wav),
+                False
+                )
+                # gts_wav.data.cpu().numpy(),
+                # preds_wav.data.cpu().numpy(),
+        sdr_mix, _, _, _ = bss_eval_sources(
+                np.asarray(gts_wav),
+                np.asarray([mixed_audio[0][:,0].data.cpu().numpy() for n in range(N)]),
+                False)
+    # return np.asarray(gts_wav), np.asarray(preds_wav)
+    # return sdr_mix, sdr, sir, sar
+        sdr_mix_meter.update(sdr_mix.mean())
+        sdr_meter.update(sdr.mean())
+        sir_meter.update(sir.mean())
+        sar_meter.update(sar.mean())
+    
+    return [sdr_mix_meter.average(),
+            sdr_meter.average(),
+            sir_meter.average(),
+            sar_meter.average()]
+
+def calc_loc_metrics(bboxes, outputs, evaluator_0, evaluator_1):
+    """
+    bboxes: batch["bboxes"]
+    outputs: return of model(eval)
+    """
+    # meters
+    # evaluator_0 = EvaluatorFull()
+    # evaluator_1 = EvaluatorFull()
+    
+    mask_pred_results = outputs["mask_pred_results"].data.cpu().numpy()
+
+    tau = 0.03
+    av_min, av_max = -1. / tau, 1. / tau
+    min_max_norm = lambda x, xmin, xmax: (x - xmin) / (xmax - xmin)
+
+    B = outputs["pred_masks"].shape[0] # 4
+    for b in range(B):
+        gt_map = bboxes['gt_map'][b].data.cpu().numpy()     # (2, 224, 224)
+        bb = bboxes['bboxes'][b]
+        bb = bb[bb[:, 0] >= 0].numpy().tolist()
+
+        N = len(bb)
+        for n in range(N):
+            hw = mask_pred_results[b, n, 0].size
+            scores = min_max_norm(mask_pred_results[b, n, 0], av_min, av_max)
+            pred = utils.normalize_img(scores)
+            conf = np.sort(scores.flatten())[-hw//4:].mean()
+            thr = np.sort(pred.flatten())[int(n*0.5)]
+
+            if n == 0:
+                evaluator_0.update(bb, gt_map[n], conf, pred, thr, None)
+            elif n == 1:
+                evaluator_1.update(bb, gt_map[n], conf, pred, thr, None)
+
+
+def visualize_mask(input_image, processed_results):
+    """
+    input_image: batched_inputs["image"][0]
+    processed_results: list(dict{"seg": torch.Size[4, 640, 640]})
+    """
+    # visualizer = Visualizer(image, self.metadata, instance_mode=self.instance_mode)
+    img_rgb = input_image.permute(1,2,0).data.cpu().numpy()[:,:,::-1]
+    img = np.asarray(img_rgb).clip(0, 255).astype(np.uint8)
+    visualized_output = VisImage(img, scale=1.0)
+
+    # def draw_sem_seg(self, sem_seg, area_threshold=None, alpha=0.8)
+    # visualizer.draw_sem_seg(predictions["sem_seg"].argmax(dim=0).to(self.cpu_device))
+    sem_seg = processed_results[0]["seg"].argmax(dim=0).to("cpu") # 4개의 prediction 중 위치 별로 가장 높은 score가 있는 mask의 idx
+
+    if isinstance(sem_seg, torch.Tensor):
+        sem_seg = sem_seg.data.cpu().numpy()
+    labels, areas = np.unique(sem_seg, return_counts=True)
+    sorted_idxs = np.argsort(-areas).tolist()
+    labels = labels[sorted_idxs]
+
+    # for label in filter(lambda l: l < len(self.metadata.stuff_classes), labels):
+    alpha=0.8
+    for label in labels:
+
+        binary_mask = (sem_seg == label).astype(np.uint8)
+        
+        color = random_color(rgb=True, maximum=1)
+        color = mplc.to_rgb(color)
+        has_valid_segment = False
+        binary_mask = binary_mask.astype("uint8")  # opencv needs uint8
+        mask = GenericMask(binary_mask, visualized_output.height, visualized_output.width)
+        shape2d = (binary_mask.shape[0], binary_mask.shape[1])
+
+        rgba = np.zeros(shape2d + (4,), dtype="float32")
+        rgba[:, :, :3] = color
+        rgba[:, :, 3] = (mask.mask == 1).astype("float32") * alpha
+        has_valid_segment = True
+        visualized_output.ax.imshow(rgba, extent=(0, visualized_output.width, visualized_output.height, 0))
+    
+    return visualized_output
+
+
+
+from MODULES.AVSL_model_light import AVSLModelLight
+from MODULES.criterion_custom import AS_loss
+
+class LightTrainer:
+    def __init__(self, cfg):
+
+        self.device = torch.device(cfg.MODEL.DEVICE)
+
+        self.model = AVSLModelLight(cfg, training=True)
+        self.model.zero_grad()
+
+        self.optimizer = torch.optim.Adam(
+            self.model.parameters(),    
+            lr=0.003               
+        )
+
+        self.scheduler = lr_scheduler.StepLR(
+            self.optimizer,             
+            step_size=100,         
+            gamma=0.9              
+        )
+        
+        folder_path = cfg.SOLVER.DATA_FOLDER
+        self.train_dataloader = VideoDataLoader(cfg, folder_path, cfg.SOLVER.IMS_PER_BATCH)
+
+        self.history = []
+        self.num_tokens = cfg.MODEL.MASK_FORMER.NUM_OBJECT_TOKENS
+        #######################
+
+
+    def train(self, epochs):
+        self.model.train()
+        total_step = len(self.train_dataloader)
+        
+        for epoch in range(epochs):
+    
+            for i, batch in enumerate(self.train_dataloader):
+                
+                outputs = self.model(batch, mode='train')
+                as_loss = AS_loss(outputs["mixed_audio_spec"], outputs["sep_audio_specs"])
+                
+                # Backward and optimize
+                self.optimizer.zero_grad()
+                as_loss = as_loss.to(self.device)
+                as_loss.backward() 
+                self.optimizer.step()
+                # if i%100 == 0:
+                if i%1000 == 0:
+                    self.history.append(as_loss)
+
+                    # file_name = 'epoch_' + str(epoch) + '_batch_' + str(i) 
+                    # pickle_name = file_name + '.pickle'
+                    # pickle_path = os.path.join(SAVE_DIR, pickle_name)
+                    # with open (pickle_path, 'wb') as f:
+                    #     pickle.dump(as_loss, f)
+                    
+                    # weight_name = file_name + '.pth'
+                    # weight_path = os.path.join(SAVE_DIR, weight_name)
+                    # torch.save(self.model.state_dict(), weight_path)
+
+                    print('Epoch [{}/{}], Step [{}/{}], Loss: {}'
+                        .format(epoch + 1, epochs, i + 1, total_step, as_loss))

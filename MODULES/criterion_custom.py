@@ -2,20 +2,19 @@
 criterion.
 recommend using at least 4 GPU cards with above 20GB memories per card.
 """
-import logging
+# import logging
 import torch
-import torch.nn.functional as F
+# import torch.nn.functional as F
 from torch import nn
 import numpy as np
 from numpy import dot
 from numpy.linalg import norm
-from math import log
 from math import log10
 from librosa.feature import spectral_flatness
-from detectron2.structures import ImageList
+# from detectron2.structures import ImageList
 from torch.nn import CosineSimilarity
 
-def AS_loss(mixed_audio_spec, sep_audio_specs):
+def AS_loss(mixed_audio_spec, sep_audio_specs, condition='pow_sum_sqrt'):
     """
     Parameters: 
     - mixed_audio_spec: batch_size*(num_tokens+1), channel_num, time_steps, freq_bins
@@ -24,28 +23,18 @@ def AS_loss(mixed_audio_spec, sep_audio_specs):
     Returns: 
     - AS_loss for batch
     """
-    return torch.sum(torch.pow(torch.sum(sep_audio_specs, dim=0) - mixed_audio_spec, 2))
-    # loss = 0
-    # for x in range(len(mixed_audio_spec)):
-    #     sp_sum = 0
-    #     for i in range(sep_audio_specs.shape[0]):
-    #         # add all separated spectrogram in the batch 
-    #         sp_sum += sep_audio_specs[i][x]
-    #     # add all mixed spectrogram in the batch and get the MSE   
-    #     loss += (sp_sum - mixed_audio_spec[x])**2
-    # return loss
+    # mixed_audio_spec -> chan
+    if condition == 'pow_sum':
+        return torch.sum(torch.pow(torch.sum(sep_audio_specs, dim=0) - mixed_audio_spec, 2))
+    elif condition == 'abs_sum':
+        return torch.sum(torch.abs(torch.sum(sep_audio_specs, dim=0) - mixed_audio_spec, 2))
+    elif condition == 'pow_sum_sqrt':
+        return torch.sqrt(torch.sum(torch.pow(torch.sum(sep_audio_specs, dim=0) - mixed_audio_spec, 2)))
+
 
 def hann_func(x):
     return 0.5 * (1 - np.cos(2 * np.pi * x))
 
-# Original function
-# def get_power(x, dB=False):
-#     power = 0
-#     for i in range(len(x)):
-#         power += x[i]**2
-#     if dB:
-#         power = 10 * log(power)
-#     return power
 
 def get_power(x, dB=False):
     """
@@ -73,43 +62,54 @@ def get_energy(y):
     """
     return torch.mean(torch.pow(y, 2), dim=-1)
 
-def gmean(input_x, dim):
-    """
-    get geometric mean
-    """
-    log_x = torch.log(input_x)
-    return torch.exp(torch.mean(log_x, dim=dim))
 
-def get_spectral_flatness(spec):
+def get_spectral_flatness(S,dim=-1, return_time_seq = True):
+    x_thresh = torch.maximum(torch.tensor(1e-4).type_as(S), torch.pow(S,2))
+    gmean = torch.exp(torch.mean(torch.log(x_thresh),dim=dim))
+    amean = torch.mean(x_thresh,dim=dim)
+    if return_time_seq:
+        return gmean / amean
+    else:
+        return torch.mean(gmean/amean, dim=-1)
+
+
+
+def get_power_LSJver(spec, calc='asdf'):
     """
     input : (batch, n, time, freq)
     return : (batch, n, time_scalar)
     """
-    return torch.mean(gmean(spec,dim=-1)/(torch.mean(spec,dim=-1)),dim=2)
+    if calc == 'mean':
+        return torch.mean(torch.pow(spec, 2), dim=-1)
+    elif calc == 'sum':
+        return torch.sum(torch.pow(spec, 2), dim=-1)
+    elif calc == 'abs_mean':
+        return torch.mean(torch.abs(spec), dim=-1)
+    else:
+        return torch.sum(torch.abs(spec), dim=-1)
 
-def get_power_LSJver(spec):
-    """
-    input : (batch, n, time, freq)
-    return : (batch, n, time_scalar)
-    """
-    return torch.sum(torch.pow(spec, 2), dim=-1)
 
 
-# Original function
-# def LS_loss(sep_audio_specs):
-#     """
-#     sf: spectral_flatness of the audio 
-#     p: power of the audio
-#     """
-#     # check if get_power & spectral_flatness can use spectrogram inputs
-#     sf = spectral_flatness(sep_audio_specs)
-#     p = get_power(sep_audio_specs)
-#     y = sf * p
-#     return hann_func(y)
 
-def LS_loss_LSJver(sep_audio_specs,use_hann=False):
+cos_ = CosineSimilarity(dim=0)
+def diff_feature_loss(sep_audio_features, batch_size):
+    loss = torch.tensor(0)
+    for b in range(batch_size):
+        for i in range(batch_size):
+            for j in range(batch_size):
+                if i < j:
+                    loss = loss + (1.0 - torch.abs(cos_(sep_audio_features[b][i],sep_audio_features[b][j])) + 1e-4)
+    return loss
+
+def LS_loss_LSJver(sep_audio_specs,use_hann=False, device = 'cuda:1'):
+    power = get_power_LSJver(sep_audio_specs, calc='mean')
+
+    # np_sep_audio_specs = sep_audio_specs.cpu().detach().numpy()
+    # flatness = get_spectral_flatness(S=np.transpose(np_sep_audio_specs,(0,1,3,2)))
+    # flatness = torch.from_numpy(flatness).to(device)
     flatness = get_spectral_flatness(sep_audio_specs)
-    power = get_power_LSJver(sep_audio_specs)
+    # flatness = torch.mean(flatness, dim=-1).squeeze()
+    
 
     if use_hann:
         """
@@ -123,135 +123,29 @@ def LS_loss_LSJver(sep_audio_specs,use_hann=False):
         작은 소리(power-> 0)는 flat(-> 1)할 테니까
         flatness, power 둘 다 0으로 갈 확률은 적을 것이라는 전제 하에 사용 가능성 있음
         """
-        return torch.sum(flatness * power)
+        # return torch.sum(flatness * torch.mean(torch.log1p(power),dim=-1))
+        return torch.sum(flatness * torch.log1p(power))
 
-
-def LS_loss(sep_audio_specs):
-    """
-    sf: spectral_flatness of the audio, a scalar per audio
-    p: power of the audio, a scalar per audio
-    
-    Parameters:
-    - sep_audio_specs: batch_size*(num_tokens+1), channel_num, time_steps, freq_bins
-    
-    Returns: 
-    - LS_loss for batch
-    """
-    # Initialize
-    loss = 0
-
-    # Shape (batch_size*5)*1*502*128
-    # Index for sf & p is same & we are going to add the loss anyway
-    # So just use batch_size*(num_tokens+1) as index
-    batch_and_token_size = sep_audio_specs.shape[0]
-
-    # Create an empty list to store the separated spectrograms
-    specs = []
-
-    # Iterate over each batch and extract the spec(1*502*128)
-    for i in range(batch_and_token_size):
-        spec = sep_audio_specs[i]
-        specs.append(spec)
-    
-    for i in range(specs): 
-        sf = spectral_flatness(specs[i])
-        p = get_power(specs[i])
-        # y = sf * p
-        y = (1 - sf) * p 
-        y = hann_func(y)
-
-        # get the sum of losses for each separated audio
-        loss += y
-
-    return loss
-
-def cos_sim(a,b):
-    return dot(a,b)/(norm(a) * norm(b))
 
 # Need modification
 # Original function
 cos = CosineSimilarity(dim=-1)
-def AD_loss_LSJver(audio_sep_tokens, sep_audio_features, sep_audio_specs):
+def AD_loss_LSJver(audio_sep_tokens, sep_audio_features, sep_audio_specs, device='cuda:1'):
     """
     input
-    - sep_audio_tokens : (batch, n, embed=128)
+    - sep_audio_tokens : (batch * (n+1), 1, embed=128)
     - sep_audio_features(_comp): (batch, n, embed=128)
     """
-    return torch.sum(get_spectral_flatness(sep_audio_specs) * cos(audio_sep_tokens, sep_audio_features))
+    # np_sep_audio_specs = sep_audio_specs.cpu().detach().numpy()
+    # flatness = torch.from_numpy(spectral_flatness(S=np.transpose(np_sep_audio_specs,(0,1,3,2)))).to(device).squeeze()
+    flatness = get_spectral_flatness(sep_audio_specs, return_time_seq=False)
+    return torch.sum(flatness * torch.abs(cos(audio_sep_tokens, sep_audio_features)))
+
     
 
+def Scoremap_loss_LSJver(masks):
+    return torch.sum(-torch.log((masks.max(dim=1).values)/(masks.sum(dim=1))))
 
-def AD_loss(num_tokens, aligned_sep_audio_features, mixed_audio_spec, aligned_audio_sep_tokens):
-    
-    # need to align sep_audio_features & audio_sep_tokens for the loss
-    
-    """
-    Parameters:
-    - num_tokens: 4
-    - aligned_sep_audio_features: batch_size*num_tokens, ?
-    - mixed_audio_spec: batch_size*(num_tokens+1)?????, channel_num, time_steps, freq_bins # why does mixed audio have tokens?
-    - aligned_audio_sep_tokens: batch_size*num_tokens, ?
-    - batch_size: batch size
-
-    Returns: 
-    - AD_loss for batch
-    """
-    loss = 0
-    # original function
-    # for n in range(len(num_tokens)):
-    #     loss +=  -log(spectral_flatness(mixed_audio_spec[n]))* cos_sim(np.max(aligned_sep_audio_features[n], axis=1), 
-    #                                                                    aligned_audio_sep_tokens[n])
-
-    # batch_size*(num_tokens+1) # ????? why are tokens in the mixed audio?
-    #mixed_audio_spec.shape[0]
-    # batch_size*num_tokens # audio features do not have noise token
-    #aligned_audio_sep_tokens.shape[0]
-    # need to match the shape
-
-    return loss
-
-# Original function
-# def Scoremap_loss(masks: torch.Tensor) -> torch.Tensor:
-#     loss_map = [map.max(dim=0).values / map.sum(dim=0) for map in masks]
-#     losses = ImageList.from_tensors(loss_map).tensor # N*256*256
-#     losses = -torch.log(losses)
-#     return losses.sum()
-
-def Scoremap_loss(masks_in_batch: torch.Tensor) -> torch.Tensor:
-    """
-    Parameters:
-    - masks_in_batch: batch_size, num_tokens, mask_dim, mask_dim # batch_size*4*256*256
-
-    Returns: 
-    - Scoremap_loss for batch
-    """
-    # Initialize
-    loss = 0
-
-    # Shape batch_size*4*256*256
-    batch_size = masks_in_batch.shape[0]
-
-    # Create an empty list to store the separated chunks
-    chunks = []
-
-    # Iterate over each batch and extract the 4*256*256 masks
-    for i in range(batch_size):
-        chunk = masks_in_batch[i]
-        chunks.append(chunk)
-
-    # get each masks in a single video in batch        
-    for i in range(chunks): 
-        masks = chunks[i]
-        # the code expects masks: num_tokens, mask_dim, mask_dim # 4*256*256
-        loss_map = [map.max(dim=0).values / map.sum(dim=0) for map in masks]
-        losses = ImageList.from_tensors(loss_map).tensor # N*256*256
-        losses = -torch.log(losses)
-        losses = losses.sum()
-
-        # get the sum of losses in the batch
-        loss += losses
-
-    return loss
 
 def contrastive_loss(logits: torch.Tensor) -> torch.Tensor:
     return nn.functional.cross_entropy(logits, torch.arange(len(logits), device=logits.device))
@@ -284,18 +178,17 @@ def CLIP_loss(sep_audio_features_embeds: torch.Tensor, pp_embeds: torch.Tensor, 
 class SetCriterion(nn.Module):
     
     def __init__(self, 
-                 AS_loss, 
-                 LS_loss, 
-                 AD_loss, 
-                 Scoremap_loss, 
-                 CLIP_loss, 
-                 AS_weight, 
-                 LS_weight, 
-                 AD_weight, 
-                 Scoremap_weight, 
-                 CLIP_weight, 
-                 batch_size, 
-                 num_tokens):
+                batch_size, 
+                num_tokens,
+                small_value = 1e-4,
+                use_hann = False,
+                weight_dict = {
+                    "AS_weight":1, 
+                    "LS_weight":1, 
+                    "AD_weight":1, 
+                    "Scoremap_weight":0.001,
+                    "CLIP_weight":1}
+                ):
         """Create the criterion.
 
         Args:
@@ -306,32 +199,24 @@ class SetCriterion(nn.Module):
         """
         super().__init__()
         self.AS_loss = AS_loss
-        self.LS_loss = LS_loss
-        self.AD_loss = AD_loss
-        self.Scoremap_loss = Scoremap_loss
+        self.LS_loss = LS_loss_LSJver
+        self.diff_feature_loss = diff_feature_loss
+        self.diff_token_loss = diff_feature_loss
+        self.AD_loss = AD_loss_LSJver
+        self.Scoremap_loss = Scoremap_loss_LSJver
         self.CLIP_loss = CLIP_loss
-        self.AS_weight = AS_weight
-        self.LS_weight = LS_weight
-        self.AD_weight = AD_weight
-        self.Scoremap_weight = Scoremap_weight
-        self.CLIP_Weight = CLIP_weight
+        self.weight_dict = weight_dict
         self.batch_size = batch_size
         self.num_tokens = num_tokens
+        self.use_hann = use_hann
+        self.small_value = small_value
+        # self.device = 'cuda:1'
 
-    def forward(self, 
-                mixed_audio_spec, 
-                sep_audio_specs, 
-                num_tokens, 
-                sep_audio_features, 
-                audio_sep_tokens, 
-                masks, 
-                sep_audio_features_embeds, 
-                pp_embeds, 
-                batch_size):
+    def forward(self, output, device):
         """Compute the losses
 
         - mixed_audio_spec: batch_size*(num_tokens+1)??, channel_num, time_steps, freq_bins
-        - sep_audio_specs: batch_size*(num_tokens+1), channel_num, time_steps, freq_bins
+        - sep_audio_specs: batch_size, channel_num, time_steps, freq_bins
         - num_tokens: 4
         - sep_audio_features: batch_size*num_tokens, time_steps, hidden_dim
         - audio_sep_tokens: batch_size, num_tokens, hidden_dim
@@ -340,29 +225,18 @@ class SetCriterion(nn.Module):
         - pp_embeds: batch_size, mask_dim, mask_dim, mask_dim
         - batch_size: batch size
         """
-        AS_loss = self.AS_loss(mixed_audio_spec, sep_audio_specs)
-
-        # Other losses uses a single video, need to get the sum of the batch
-        # e.g. in batch of n videos there are multiple videos
-        LS_loss = self.LS_loss(sep_audio_specs)
-        AD_loss = self.AD_loss(num_tokens, sep_audio_features, mixed_audio_spec, audio_sep_tokens)
-        Scoremap_loss = self.Scoremap_loss(masks)
-
-        # CLIP loss uses the whole batch
-        CLIP_loss = self.CLIP_loss(sep_audio_features_embeds, pp_embeds, batch_size)
+        loss_dict = {}
+        loss_dict["AS_loss"] = self.AS_loss(output["mixed_audio_spec"], output["sep_audio_specs"])
+        loss_dict["LS_loss"] = self.LS_loss(output["sep_audio_specs_wo_noise"], self.use_hann, device=device)
+        loss_dict["DF_loss"] = self.diff_feature_loss(output["sep_audio_features"], self.batch_size)
+        loss_dict["DT_loss"] = self.diff_token_loss(output['audio_sep_tokens'], self.batch_size)
+        loss_dict["AD_loss"] = self.AD_loss(output["audio_sep_tokens"], output["sep_audio_features_comp"], output["sep_audio_specs_wo_noise"], device=device)
+        loss_dict["Scoremap_loss"] = self.Scoremap_loss(output["pred_masks"])
+        loss_dict["CLIP_loss"] = self.CLIP_loss(output["sep_audio_features_embeds"], output["pp_embeds"], self.batch_size)
 
 
-        # weights for each losses
-        weighted_AS_loss = self.AS_weight * AS_loss
-        weighted_LS_loss = self.LS_weight * LS_loss
-        weighted_AD_loss = self.AD_weight * AD_loss
-        weighted_Scoremap_loss = self.Scoremap_weight * Scoremap_loss
-        weighted_CLIP_loss = self.CLIP_Weight * CLIP_loss
+        return loss_dict
         
-        # sum
-        total_loss = weighted_AS_loss + weighted_LS_loss + weighted_AD_loss + weighted_Scoremap_loss + weighted_CLIP_loss
-        
-        return total_loss
 
 """
 Example usage

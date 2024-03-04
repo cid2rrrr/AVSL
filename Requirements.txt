@@ -25,6 +25,6 @@ tqdm==4.62.3
 resampy
 tf_slim
 six
-numpy==1.19.5
+# numpy==1.19.5
 tensorflow==2.5.0rc3
 tf-slim==1.1.0
