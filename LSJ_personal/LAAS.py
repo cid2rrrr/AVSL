@@ -661,9 +661,13 @@ class LAAS(pl.LightningModule):
         quries = None
         conditions = quries
         
+        # batch_size = input.shape[0]
+
         # x = separated audios
         # x = self.ASP(input["audio"], conditions)['sp'].detach().numpy()#.reshape(channels, length)
-        x = self.ASP(input=input["audio"], condition=input["conditions"])['sp'].detach().numpy()#.reshape(channels, length)
+        x = self.ASP(input=input["audio"], condition=input["conditions"])
+        temp_wav_out = x['wav']
+        x = x['sp'].detach().numpy()#.reshape(channels, length)
         
         # 버리는 audio
         # x = x[:-1]
@@ -672,13 +676,17 @@ class LAAS(pl.LightningModule):
         x = torch.index_select(torch.from_numpy(x), 0, torch.tensor([i for i in range(x.shape[0]) if i not in indices_to_exclude])).squeeze()
         
 
-        return x
-        # audio_features = []
-        # for i in range(x.shape[0]):
-        #     audio_features.append(self.VGGish(x[i], fs=16000))
-        # audio_features = torch.stack(audio_features)
+        # return x
+        audio_features = []
+        for i in range(x.shape[0]):
+            audio_features.append(self.VGGish(x[i], fs=16000))
+        audio_features = torch.stack(audio_features)
+        # for i in range(batch_size):
+        #     for j in range(x.shape[0]/batch_size):
+                
+        
 
-        # # do other things
-        # return audio_features
+        # do other things
+        return audio_features
 
         

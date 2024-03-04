@@ -1,16 +1,18 @@
 import csv
-import pandas as pd
+#import pandas as pd
 import os
 from pytube import YouTube
 from pytube.exceptions import VideoUnavailable
 from moviepy.video.io.VideoFileClip import VideoFileClip
 
 
-CSV_PATH = './unbalanced_train_segments.csv'
+CSV_PATH = '/workspace/GitHub/AVSL/dataset_chunk/chunk_1.csv'
 OUTPUT_PATH = './videos' # need to change to server dir to save the clips
-
+START_INDEX = 0
+log_index = 46280 # stopped index
 
 def download_and_trim_video(cnt, youtube_id, output_folder, start_time_seconds, end_time_seconds):
+    cnt += START_INDEX
     # YouTube video URL with the specified ID
     video_url = f"https://www.youtube.com/watch?v={youtube_id}"
 
@@ -28,17 +30,20 @@ def download_and_trim_video(cnt, youtube_id, output_folder, start_time_seconds, 
         video_title = youtube.title
 
         # Trim the video clip
-        clip = VideoFileClip(video_path).subclip(float(start_time_seconds), float(end_time_seconds))
+        # context manager
+        with VideoFileClip(video_path) as clip:
+            clip = VideoFileClip(video_path).subclip(float(start_time_seconds), float(end_time_seconds))
 
-        # Generate a unique name for the trimmed clip based on the video title
-        # output_clip_name = f"{video_title.replace(' ', '_')}_trimmed.mp4"
-        # output_clip_name = str(youtube_id)+"_trimmed.mp4"
-        output_clip_name = str(cnt)+".mp4"
-        output_clip_path = os.path.join(output_folder, output_clip_name)
+            # Generate a unique name for the trimmed clip based on the video title
+            # output_clip_name = f"{video_title.replace(' ', '_')}_trimmed.mp4"
+            # output_clip_name = str(youtube_id)+"_trimmed.mp4"
+            output_clip_name = str(cnt)+".mp4"
+            output_clip_path = os.path.join(output_folder, output_clip_name)
 
-        # Save the trimmed clip
-        clip.write_videofile(output_clip_path, codec="libx264", audio_codec="aac")
-        clip.close()
+            # Save the trimmed clip
+            clip.write_videofile(output_clip_path, codec="libx264", audio_codec="aac")
+            # clip.close() is causing issues
+            clip.close()
 
         # Delete the full-length video
         os.remove(video_path)
@@ -61,11 +66,13 @@ def main():
     for l in reader:
         csv_list.append(l)
     f.close()
-    del csv_list[0]
-    del csv_list[0]
-    del csv_list[0]
+    
+# not needed for chunk_1
+#    del csv_list[0]
+#    del csv_list[0]
+#    del csv_list[0]
 
-    for cnt, entry in enumerate(csv_list):
+    for cnt, entry in enumerate(csv_list, start=log_index):
         files = os.listdir(OUTPUT_PATH)
         if str(cnt)+'.mp4' in files:
             print(str(cnt)+".mp4 Already Exists")

@@ -1,0 +1,3 @@
+[02/14 10:26:25] mask2former.modeling.pixel_decoder.fpn WARNING: Calling forward() may cause unpredicted behavior of PixelDecoder module.
+[02/14 10:27:45] mask2former.modeling.pixel_decoder.fpn WARNING: Calling forward() may cause unpredicted behavior of PixelDecoder module.
+[02/14 10:30:20] mask2former.modeling.pixel_decoder.fpn WARNING: Calling forward() may cause unpredicted behavior of PixelDecoder module.

@@ -28,6 +28,7 @@ from detectron2.engine import (
     launch,
 )
 
+# initially same as maskformer
 from detectron2.projects.deeplab import add_deeplab_config, build_lr_scheduler
 from detectron2.solver.build import maybe_add_gradient_clipping
 from detectron2.utils.logger import setup_logger
@@ -35,7 +36,7 @@ from detectron2.utils.logger import setup_logger
 # avsl version, we do not use a dataset mapper
 from AVSL import (
     dataloader,
-    add_avsl_config,
+    add_avsl_config, # do we need this?
 )
 
 class Trainer(DefaultTrainer):
@@ -138,6 +139,35 @@ class Trainer(DefaultTrainer):
         if not cfg.SOLVER.CLIP_GRADIENTS.CLIP_TYPE == "full_model":
             optimizer = maybe_add_gradient_clipping(cfg, optimizer)
         return optimizer
+    
+    def train_step(self):
+        """
+        Implement the logic for one train step.
+        """
+        data = next(self._data_loader_iter)
+        data = self.preprocess_batch(data)
+        data = self.model(data)
+        
+        # Extract necessary data from the model output
+        audio_gt = ...
+        x = ...
+        N = ...
+        audio_features = ...
+        D = ...
+        masks = ...
+        mask_embedding = ...
+        mask_features = ...
+        batch_size = ...
+
+        # Compute the loss using SetCriterion
+        loss = self.criterion(audio_gt, x, N, audio_features, D, masks, mask_embedding, mask_features, batch_size)
+        
+        # optimization logic e.g., backward pass and optimizer step
+        self.optimizer()
+        loss.backward()
+        self.optimizer.step()
+        
+        return {"loss": loss.item()}  # Return the loss value for logging
 
 # setup function using get_cfg to load parameters
 def setup(args):
@@ -188,3 +218,6 @@ if __name__ == "__main__":
         args=(args,),
     )
  
+"""
+python trainer.py --num-gpus <num_gpus> --num-machines <num_machines> --machine-rank <machine_rank> --dist-url <dist_url> ...
+"""

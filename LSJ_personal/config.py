@@ -31,6 +31,7 @@ max_epoch = 100
 num_workers = 3
 lr_scheduler_epoch = [90, 110]
 # latent_dim = 2048
+# latent_dim = 128
 latent_dim = 128
 
 # for signal processing
