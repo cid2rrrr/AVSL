@@ -1,3 +1,4 @@
+import logging
 import os, pickle
 from tqdm import tqdm, trange
 import torch
@@ -20,8 +21,10 @@ from detectron2.utils.visualizer import ColorMode, Visualizer, GenericMask, VisI
 import matplotlib.colors as mplc
 from detectron2.utils.colormap import random_color
 
-SAVE_DIR = './pickle/0228test'
-
+SAVE_DIR = './pickle/0305test'
+"""
+add logging
+"""
 class Trainer:
     def __init__(self, cfg):
 
@@ -54,35 +57,38 @@ class Trainer:
         total_step = len(self.train_dataloader)
         
         for epoch in range(epochs):
-    
-            for i, batch in enumerate(self.train_dataloader):
+            try:
+
+                for i, batch in enumerate(self.train_dataloader):
                 
-                loss = self.model(batch, mode='train')
-                losses = torch.tensor(0)
-                for key in loss.keys():
-                    losses = losses + loss[key]
+                    loss = self.model(batch, mode='train')
+                    losses = torch.tensor(0)
+                    for key in loss.keys():
+                        losses = losses + loss[key]
 
-                # Backward and optimize
-                self.optimizer.zero_grad()
-                losses = losses.to(self.device)
-                losses.backward() 
-                self.optimizer.step()
-                # if i%100 == 0:
-                if i%1000 == 0:
-                    self.history.append(loss)
+                    # Backward and optimize
+                    self.optimizer.zero_grad()
+                    losses = losses.to(self.device)
+                    losses.backward() 
+                    self.optimizer.step()
+                    # if i%100 == 0:
+                    if i%1000 == 0:
+                        self.history.append(loss)
 
-                    file_name = 'epoch_' + str(epoch) + '_batch_' + str(i) 
-                    pickle_name = file_name + '.pickle'
-                    pickle_path = os.path.join(SAVE_DIR, pickle_name)
-                    with open (pickle_path, 'wb') as f:
-                        pickle.dump(loss, f)
-                    
-                    weight_name = file_name + '.pth'
-                    weight_path = os.path.join(SAVE_DIR, weight_name)
-                    torch.save(self.model.state_dict(), weight_path)
+                        file_name = 'epoch_' + str(epoch) + '_batch_' + str(i) 
+                        pickle_name = file_name + '.pickle'
+                        pickle_path = os.path.join(SAVE_DIR, pickle_name)
+                        with open (pickle_path, 'wb') as f:
+                            pickle.dump(loss, f)
+                        
+                        weight_name = file_name + '.pth'
+                        weight_path = os.path.join(SAVE_DIR, weight_name)
+                        torch.save(self.model.state_dict(), weight_path)
 
-                    print('Epoch [{}/{}], Step [{}/{}], Loss: {}'
-                        .format(epoch + 1, epochs, i + 1, total_step, loss))
+                        print('Epoch [{}/{}], Step [{}/{}], Loss: {}'
+                            .format(epoch + 1, epochs, i + 1, total_step, loss))
+            except:
+                print("video error")
     
     def urmp_evaluate(self, cfg, vizualization=False):
         self.model.eval()
@@ -120,7 +126,7 @@ class Trainer:
             return visualized_output
         
 
-    def music_evaluate(self, cfg, vizualization=False):
+    def music_evaluate(self, cfg, viz_idx_list=None):
         self.model.eval()
 
         # MUSIC dataset load
@@ -131,11 +137,21 @@ class Trainer:
         evaluator_0 = EvaluatorFull()
         evaluator_1 = EvaluatorFull()
         best_precision, best_ap, best_f1 = 0., 0., 0.
-    
+        viz_list = []
+
         for i, batch in tqdm(enumerate(eval_dataloader)):
             if batch["bboxes"]["gt_map"].shape[1] > self.num_tokens:
                 continue
-            _, _, outputs, _ = self.model(batch, mode='eval')
+            if viz_idx_list is None or i not in viz_idx_list:
+                _, _, outputs, _ = self.model(batch, mode='eval')
+            # elif :
+                # _, _, outputs, _ = self.model(batch, mode='eval')
+            else:
+                _, _, outputs, processed_results = self.model(batch, mode='eval', visualization=True)
+                visualized_output = visualize_mask(batch["image"][0], processed_results)
+                viz_list.append(visualized_output)
+                return viz_list
+
             calc_loc_metrics(batch["bboxes"], outputs, evaluator_0, evaluator_1)
             
         precision = (evaluator_0.precision_at_10() + evaluator_1.precision_at_10()) / 2
@@ -148,10 +164,10 @@ class Trainer:
         'Precision: {:.4f}, AP: {:.4f}, F1: {:.4f}'.format(precision, ap, f1))
         print('best Precision: {:.4f}, best AP: {:.4f}, best F1: {:.4f}'.format(best_precision, best_ap, best_f1))
         
-        if vizualization == True:
-            _, _, _, processed_results = self.model(batch, mode='eval', visualization=True)
-            visualized_output = visualize_mask(batch["image"][0], processed_results)  
-            return visualized_output
+        # if vizualization == True:
+        #     _, _, _, processed_results = self.model(batch, mode='eval', visualization=True)
+        #     visualized_output = visualize_mask(batch["image"][0], processed_results)  
+        #     return visualized_output
 
 
 def calc_sep_metrics(mixed_audio, sep_audio_gts, outputs):
@@ -224,7 +240,7 @@ def calc_loc_metrics(bboxes, outputs, evaluator_0, evaluator_1):
             scores = min_max_norm(mask_pred_results[b, n, 0], av_min, av_max)
             pred = utils.normalize_img(scores)
             conf = np.sort(scores.flatten())[-hw//4:].mean()
-            thr = np.sort(pred.flatten())[int(n*0.5)]
+            thr = np.sort(pred.flatten())[int(hw*0.5)]
 
             if n == 0:
                 evaluator_0.update(bb, gt_map[n], conf, pred, thr, None)
@@ -277,6 +293,8 @@ def visualize_mask(input_image, processed_results):
 
 from MODULES.AVSL_model_light import AVSLModelLight
 from MODULES.criterion_custom import AS_loss
+from DATALOADER import ImageDataLoader
+import traceback
 
 class LightTrainer:
     def __init__(self, cfg):
@@ -299,6 +317,11 @@ class LightTrainer:
         
         folder_path = cfg.SOLVER.DATA_FOLDER
         self.train_dataloader = VideoDataLoader(cfg, folder_path, cfg.SOLVER.IMS_PER_BATCH)
+        
+
+        img_folder_path = 'DATA/images'
+        aud_folder_path = 'DATA/audios'
+        self.image_dataloader = ImageDataLoader(cfg, img_folder_path, aud_folder_path, 4)
 
         self.history = []
         self.num_tokens = cfg.MODEL.MASK_FORMER.NUM_OBJECT_TOKENS
@@ -309,31 +332,111 @@ class LightTrainer:
         self.model.train()
         total_step = len(self.train_dataloader)
         
-        for epoch in range(epochs):
-    
-            for i, batch in enumerate(self.train_dataloader):
+        try:
+            for epoch in range(epochs):
                 
-                outputs = self.model(batch, mode='train')
-                as_loss = AS_loss(outputs["mixed_audio_spec"], outputs["sep_audio_specs"])
-                
-                # Backward and optimize
-                self.optimizer.zero_grad()
-                as_loss = as_loss.to(self.device)
-                as_loss.backward() 
-                self.optimizer.step()
-                # if i%100 == 0:
-                if i%1000 == 0:
-                    self.history.append(as_loss)
+                # for i, batch in enumerate(self.train_dataloader):
+                for i, batch in enumerate(self.image_dataloader):
 
-                    # file_name = 'epoch_' + str(epoch) + '_batch_' + str(i) 
-                    # pickle_name = file_name + '.pickle'
-                    # pickle_path = os.path.join(SAVE_DIR, pickle_name)
-                    # with open (pickle_path, 'wb') as f:
-                    #     pickle.dump(as_loss, f)
+                    outputs = self.model(batch, mode='train')
+                    as_loss = AS_loss(outputs["mixed_audio_spec"], outputs["sep_audio_specs"])
                     
-                    # weight_name = file_name + '.pth'
-                    # weight_path = os.path.join(SAVE_DIR, weight_name)
-                    # torch.save(self.model.state_dict(), weight_path)
+                    # Backward and optimize
+                    self.optimizer.zero_grad()
+                    as_loss = as_loss.to(self.device)
+                    as_loss.backward() 
+                    self.optimizer.step()
+                    # if i%100 == 0:
+                    if i%1000 == 0:
+                        self.history.append(as_loss)
 
-                    print('Epoch [{}/{}], Step [{}/{}], Loss: {}'
+                        file_name = 'epoch_' + str(epoch) + '_batch_' + str(i) 
+                        pickle_name = file_name + '.pickle'
+                        pickle_path = os.path.join(SAVE_DIR, pickle_name)
+                        with open (pickle_path, 'wb') as f:
+                            pickle.dump(as_loss, f)
+                        
+                        weight_name = file_name + '.pth'
+                        weight_path = os.path.join(SAVE_DIR, weight_name)
+                        torch.save(self.model.state_dict(), weight_path)
+
+                        print('Epoch [{}/{}], Step [{}/{}], Loss: {}'
                         .format(epoch + 1, epochs, i + 1, total_step, as_loss))
+
+        except Exception as e:
+                err = traceback.format_exc()
+                save_string_to_file(err, "pickle/0305test/err.txt")
+                print(err)
+
+
+def save_string_to_file(string, filename):
+    with open(filename, 'w') as f:
+        f.write(string)
+
+
+
+class URMPTrainer:
+    def __init__(self, cfg):
+
+        self.device = torch.device(cfg.MODEL.DEVICE)
+
+        self.model = AVSLModelLight(cfg, training=True)
+        self.model.zero_grad()
+
+        self.optimizer = torch.optim.Adam(
+            self.model.parameters(),    
+            lr=0.003               
+        )
+
+        self.scheduler = lr_scheduler.StepLR(
+            self.optimizer,             
+            step_size=100,         
+            gamma=0.9              
+        )
+        
+        folder_path = cfg.SOLVER.DATA_FOLDER
+        self.train_dataloader = EvaluationDataLoader(cfg, cfg.TEST.DATA_FOLDER, cfg.TEST.IMS_PER_BATCH)
+
+        self.history = []
+        self.num_tokens = cfg.MODEL.MASK_FORMER.NUM_OBJECT_TOKENS
+        #######################
+
+
+    def train(self, epochs):
+        self.model.train()
+        total_step = len(self.train_dataloader)
+        
+        try:
+            for epoch in range(epochs):
+                
+                for i, batch in enumerate(self.train_dataloader):
+
+                    outputs = self.model(batch, mode='train')
+                    as_loss = AS_loss(outputs["mixed_audio_spec"], outputs["sep_audio_specs"])
+                    
+                    # Backward and optimize
+                    self.optimizer.zero_grad()
+                    as_loss = as_loss.to(self.device)
+                    as_loss.backward() 
+                    self.optimizer.step()
+                    # if i%100 == 0:
+                    if i%43 == 0:
+                        self.history.append(as_loss)
+
+                        file_name = 'epoch_' + str(epoch) + '_batch_' + str(i) 
+                        pickle_name = file_name + '.pickle'
+                        pickle_path = os.path.join("./pickle/0305test_urmp", pickle_name)
+                        with open (pickle_path, 'wb') as f:
+                            pickle.dump(as_loss, f)
+                        
+                        weight_name = file_name + '.pth'
+                        weight_path = os.path.join("./pickle/0305test_urmp", weight_name)
+                        torch.save(self.model.state_dict(), weight_path)
+
+                        print('Epoch [{}/{}], Step [{}/{}], Loss: {}'
+                        .format(epoch + 1, epochs, i + 1, total_step, as_loss))
+
+        except Exception as e:
+                err = traceback.format_exc()
+                # save_string_to_file(err, "pickle/0305test/err.txt")
+                print(err)

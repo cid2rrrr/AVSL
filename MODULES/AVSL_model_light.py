@@ -120,12 +120,12 @@ class AVSLModelLight(nn.Module):
         else:
             backbone = build_backbone(cfg) # ResNet50
         pixel_decoder = build_pixel_decoder(cfg, backbone.output_shape())
-        # mask_predictor = build_mask_predictor_light(cfg, backbone.output_shape()[cfg.MODEL.MASK_FORMER.TRANSFORMER_IN_FEATURE].channels)
-        mask_predictor = build_mask_predictor_light(cfg,cfg.MODEL.SEM_SEG_HEAD.CONVS_DIM)
+        mask_predictor = build_mask_predictor_light(cfg, backbone.output_shape()[cfg.MODEL.MASK_FORMER.TRANSFORMER_IN_FEATURE].channels)
+        # mask_predictor = build_mask_predictor_light(cfg,cfg.MODEL.SEM_SEG_HEAD.CONVS_DIM)
         ###
 
         weight_dict = {
-                    "AS_loss":1, 
+                    "AS_loss":1e-2, 
                     "LS_loss":1, 
                     "AD_loss":1, 
                     "DF_loss":1, 
@@ -177,12 +177,14 @@ class AVSLModelLight(nn.Module):
 
         audio_list = []
         for path in batched_inputs['mixed_audio_path']:
-            mixed_audio, sr = librosa.load(path, mono=True, sr=16000)
-            mixed_audio = np.append(mixed_audio, np.zeros(3000))
-            mixed_audio = mixed_audio[:160000]
+            mixed_audio, sr = librosa.load(path, mono=True, sr=16000, duration=10)
+            if (mixed_audio.shape[0] < 16000 * 10):
+                mixed_audio = np.append(mixed_audio, np.zeros(3000, dtype=np.float32))
+                mixed_audio = mixed_audio[:160000]
+                # mixed_audio = mixed_audio.type(torch.cuda.FloatTensor)
             audio_list.append(torch.from_numpy(mixed_audio).unsqueeze(1))
         mixed_audio = ImageList.from_tensors(audio_list).tensor
-        mixed_audio = mixed_audio.type(torch.cuda.FloatTensor)
+        
         del audio_list
 
         with torch.no_grad():

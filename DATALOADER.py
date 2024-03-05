@@ -165,10 +165,12 @@ class ImageDataset(Dataset):
         image_format,
         ignore_label,
         size_divisibility,
-        folder_path,):
+        img_folder_path,
+        aud_folder_path,):
 
-        self.folder_path = folder_path
-        self.image_list = [f for f in os.listdir(folder_path) if f.endswith('.jpg')]
+        self.img_folder_path = img_folder_path
+        self.aud_folder_path = aud_folder_path
+        self.image_list = [f for f in os.listdir(img_folder_path) if f.endswith('.jpg')]
         self.tfm_gens = augmentations
 
         self.training = training
@@ -180,7 +182,7 @@ class ImageDataset(Dataset):
         return len(self.image_list)
 
     def __getitem__(self, idx):
-        image_path = os.path.join(self.folder_path, self.image_list[idx])
+        image_path = os.path.join(self.img_folder_path, self.image_list[idx])
         random_frame = Image.open(image_path)
         random_frame = np.array(random_frame)
         
@@ -207,7 +209,8 @@ class ImageDataset(Dataset):
             random_frame = F.pad(random_frame, padding_size, value=128).contiguous()
 
         # Return data as dictionary
-        item = {'image': random_frame, 'image_name': self.image_list[idx]}
+        audio_path = f"{self.aud_folder_path}/{self.image_list[idx][:-4]}.wav"
+        item = {'image': random_frame, 'image_name': self.image_list[idx], 'mixed_audio_path': audio_path}
         
         return item
     
@@ -252,12 +255,12 @@ class ImageDataset(Dataset):
         }
         return ret 
     
-def ImageDataLoader(cfg, folder_path, batch_size):
+def ImageDataLoader(cfg, img_folder_path, aud_folder_path, batch_size):
     """ 
     folder_path = 'path/to/your/images' 
     batch_size = 1
     """
-    image_dataset = ImageDataset(cfg, folder_path=folder_path)
+    image_dataset = ImageDataset(cfg, img_folder_path=img_folder_path, aud_folder_path=aud_folder_path)
     print(f"{len(image_dataset)} of train videos have loaded")
     dataloader = DataLoader(image_dataset, batch_size, shuffle=True)
     return dataloader
